@@ -1,8 +1,8 @@
 import "server-only";
 import { db } from "./db";
 import type { CurrentUser } from "./auth";
-
-type NotificationType = "ASSIGNED" | "MENTIONED" | "STATE_CHANGED" | "COMMENTED";
+import { appUrl, emailEnabled, sendMail } from "./email";
+import { buildNotificationEmail, type NotificationType } from "@/lib/email";
 
 interface Change {
   field: string;
@@ -13,12 +13,30 @@ interface Change {
 async function send(userIds: Iterable<string>, type: NotificationType, workItemId: number, actor: CurrentUser, message: string) {
   const ids = [...new Set(userIds)].filter((id) => id !== actor.id);
   if (ids.length === 0) return;
-  await db.notification.createMany({ data: ids.map((userId) => ({ userId, type, workItemId, actorId: actor.id, message })) });
-  if (process.env.EMAIL_NOTIFICATIONS_ENABLED === "true") {
-    // Email stub: replace with a real mail transport (SMTP, SendGrid, Graph API...).
-    const users = await db.user.findMany({ where: { id: { in: ids } }, select: { email: true } });
-    for (const u of users) console.info(`[email stub] to=${u.email} subject="#${workItemId}: ${message}"`);
-  }
+  // Only notify active users.
+  const users = await db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true, email: true, emailNotifications: true } });
+  if (users.length === 0) return;
+  await db.notification.createMany({ data: users.map((u) => ({ userId: u.id, type, workItemId, actorId: actor.id, message })) });
+  if (!emailEnabled()) return;
+  const recipients = users.filter((u) => u.emailNotifications);
+  if (recipients.length === 0) return;
+  const item = await db.workItem.findUnique({ where: { id: workItemId }, select: { title: true, projectId: true, project: { select: { name: true } } } });
+  if (!item) return;
+  await sendMail(
+    recipients.map((u) =>
+      buildNotificationEmail({
+        to: u.email,
+        recipientName: u.name,
+        type,
+        message,
+        itemId: workItemId,
+        itemTitle: item.title,
+        projectId: item.projectId,
+        projectName: item.project.name,
+        appUrl: appUrl(),
+      }),
+    ),
+  );
 }
 
 async function followerIds(workItemId: number): Promise<string[]> {
@@ -35,20 +53,35 @@ export async function follow(userId: string, workItemId: number) {
 }
 
 /** Called by the work item service after every create/update. */
-export async function notifyItemChange(args: { itemId: number; actor: CurrentUser; created: boolean; changes: Change[] }) {
+export async function notifyItemChange(args: { itemId: number; actor: CurrentUser; created: boolean; changes: Change[]; suppressAssignedNotification?: boolean }) {
   const { itemId, actor, changes } = args;
   const item = await db.workItem.findUnique({ where: { id: itemId }, select: { title: true } });
   if (!item) return;
   const assigned = changes.find((c) => c.field === "assignedToId");
   if (assigned?.newValue) {
     await follow(assigned.newValue, itemId);
-    await send([assigned.newValue], "ASSIGNED", itemId, actor, `${actor.name} assigned you #${itemId} ${item.title}`);
+    if (!args.suppressAssignedNotification) await send([assigned.newValue], "ASSIGNED", itemId, actor, `${actor.name} assigned you #${itemId} ${item.title}`);
   }
   if (args.created) return;
   const state = changes.find((c) => c.field === "state");
   if (state) {
     const followers = await followerIds(itemId);
     await send(followers, "STATE_CHANGED", itemId, actor, `${actor.name} changed #${itemId} ${item.title}: ${state.oldValue} → ${state.newValue}`);
+  }
+}
+
+/** One summary notification per assignee after a bulk create/assign. Links to the first item. */
+export async function notifyBulkAssigned(actor: CurrentUser, byAssignee: Map<string, number[]>) {
+  for (const [userId, ids] of byAssignee) {
+    if (ids.length === 0) continue;
+    const sorted = [...ids].sort((a, b) => a - b);
+    if (sorted.length === 1) {
+      const item = await db.workItem.findUnique({ where: { id: sorted[0] }, select: { title: true } });
+      await send([userId], "ASSIGNED", sorted[0], actor, `${actor.name} assigned you #${sorted[0]} ${item?.title ?? ""}`.trim());
+      continue;
+    }
+    const list = sorted.length <= 6 ? sorted.map((i) => `#${i}`).join(", ") : `${sorted.slice(0, 5).map((i) => `#${i}`).join(", ")} …`;
+    await send([userId], "ASSIGNED", sorted[0], actor, `${actor.name} assigned you ${sorted.length} work items: ${list}`);
   }
 }
 

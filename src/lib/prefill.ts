@@ -35,7 +35,14 @@ export function defectDefaultsFromTest(test: Pick<ItemView, "id" | "title" | "mo
         ]
       : [{ type: "paragraph", content: [{ type: "text", text: `See test task #${test.id}.` }] }],
   };
-  const expected = test.fields.expectedResult;
+  // Expected result may be rich text (form) or a plain string (imports/seed).
+  const raw = test.fields.expectedResult;
+  const expected: RtDoc | null =
+    typeof raw === "string" && raw.trim()
+      ? { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: raw }] }] }
+      : raw && typeof raw === "object" && (raw as RtDoc).type === "doc"
+        ? (raw as RtDoc)
+        : null;
   return {
     typeId: defect?.id,
     title: `Defect: ${test.title}`,
@@ -47,7 +54,7 @@ export function defectDefaultsFromTest(test: Pick<ItemView, "id" | "title" | "mo
     tags: test.tags,
     fields: {
       stepsToReproduce: stepsDoc,
-      ...(expected && typeof expected === "object" ? { expected } : {}),
+      ...(expected ? { expected } : {}),
     },
   };
 }

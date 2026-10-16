@@ -24,6 +24,8 @@ model User {
   /// Avatar background colour (hex)
   color        String   @default("#2563eb")
   active       Boolean  @default(true)
+  /// Receive notification emails (only used when EMAIL_NOTIFICATIONS_ENABLED=true)
+  emailNotifications Boolean @default(true)
   createdAt    DateTime @default(now())
 
   teams            TeamMember[]

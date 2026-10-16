@@ -18,7 +18,17 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        // Optional: use a preinstalled Chromium instead of `npx playwright install` (e.g. in CI or cloud sandboxes).
+        ...(process.env.PW_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } } : {}),
+      },
+    },
+  ],
   webServer: {
     command: `npx next dev --port ${PORT}`,
     url: `http://localhost:${PORT}/login`,

@@ -92,7 +92,12 @@ function typeFor(types: TypeLite[], typeId: string): TypeLite {
   return t;
 }
 
-export async function createWorkItem(rawInput: CreateItemInput, user: CurrentUser): Promise<number> {
+export interface WriteOptions {
+  /** Bulk operations send one summary "assigned" notification instead of one per item. */
+  suppressAssignedNotification?: boolean;
+}
+
+export async function createWorkItem(rawInput: CreateItemInput, user: CurrentUser, opts: WriteOptions = {}): Promise<number> {
   const input = createItemSchema.parse(rawInput);
   const meta = await loadProjectMeta(input.projectId);
   if (!meta) throw new UserError("Unknown project.");
@@ -144,7 +149,7 @@ export async function createWorkItem(rawInput: CreateItemInput, user: CurrentUse
     create: { userId: user.id, workItemId: created.id },
     update: {},
   });
-  await notifyItemChange({ itemId: created.id, actor: user, created: true, changes: [{ field: "assignedToId", oldValue: null, newValue: created.assignedToId }] });
+  await notifyItemChange({ itemId: created.id, actor: user, created: true, changes: [{ field: "assignedToId", oldValue: null, newValue: created.assignedToId }], ...opts });
   return created.id;
 }
 
@@ -165,7 +170,7 @@ function str(v: unknown): string | null {
  * Apply a partial update, validating the workflow and recording field-level history.
  * Returns the list of changed fields (empty if nothing changed).
  */
-export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: CurrentUser): Promise<FieldChange[]> {
+export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: CurrentUser, opts: WriteOptions = {}): Promise<FieldChange[]> {
   const patch = itemPatchSchema.parse(rawPatch);
   const item = await db.workItem.findUnique({ where: { id } });
   if (!item) throw new UserError("Work item not found.", "NOT_FOUND");
@@ -267,7 +272,7 @@ export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: Curr
     await db.historyEntry.createMany({
       data: changes.map((c) => ({ workItemId: id, rev, field: c.field, oldValue: c.oldValue, newValue: c.newValue, changedById: user.id })),
     });
-    await notifyItemChange({ itemId: id, actor: user, created: false, changes });
+    await notifyItemChange({ itemId: id, actor: user, created: false, changes, ...opts });
   }
   return changes;
 }

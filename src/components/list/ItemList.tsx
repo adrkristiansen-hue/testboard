@@ -15,6 +15,8 @@ import { FilterBar } from "../board/FilterBar";
 import { ItemPanel } from "../item/ItemPanel";
 import { TypeIcon, StateDot } from "../ui/TypeIcon";
 import { Avatar } from "../ui/Avatar";
+import { BulkBar } from "./BulkBar";
+import { BulkCreateDialog } from "./BulkCreateDialog";
 
 const COLUMNS: { key: string; label: MessageKey; sort: string }[] = [
   { key: "id", label: "field.id", sort: "id" },
@@ -33,7 +35,7 @@ const COLUMNS: { key: string; label: MessageKey; sort: string }[] = [
 export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemView[]; initialFilter: FilterState; initialOpenId: number | null }) {
   const { t, locale } = useI18n();
   const { typeById, userById, moduleById, phaseById, queryContext } = useProject();
-  const { user, canEdit } = useSessionUser();
+  const { user, canEdit, canConfigure } = useSessionUser();
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [filter, setFilter] = useState(initialFilter);
@@ -41,6 +43,8 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
   const [openId, setOpenId] = useState<number | null>(initialOpenId);
   const [newDefaults, setNewDefaults] = useState<NewItemDefaults | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [selection, setSelection] = useState<Set<number>>(() => new Set());
+  const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
 
   useEffect(() => {
     const p = filterToParams(filter);
@@ -56,6 +60,17 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
   }, [items, filter, sort, qctx]);
   const allTags = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
+  // Only rows that are currently shown count as selected, so hidden rows are never bulk-edited by accident.
+  const selectedRows = useMemo(() => rows.filter((r) => selection.has(r.id)), [rows, selection]);
+  const allShownSelected = rows.length > 0 && selectedRows.length === rows.length;
+  const toggleRow = (id: number) =>
+    setSelection((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () => setSelection(allShownSelected ? new Set() : new Set(rows.map((r) => r.id)));
 
   const toggleSort = (field: string) => setSort((s) => (s[0]?.field === field ? [{ field, dir: s[0].dir === "asc" ? "desc" : "asc" }] : [{ field, dir: "asc" }]));
 
@@ -69,14 +84,27 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
               + {t("item.new")}
             </button>
           )}
+          {canConfigure && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setBulkCreateOpen(true)}>
+              {t("bulkCreate.open")}
+            </button>
+          )}
           <div className="w-full lg:w-auto lg:flex-1">
             <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={rows.length} total={items.length} searchRef={searchRef} />
           </div>
         </div>
+        {canEdit && selectedRows.length > 0 && <BulkBar selected={selectedRows} onClear={() => setSelection(new Set())} onDone={refresh} />}
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_var(--color-line)]">
               <tr>
+                {canEdit && (
+                  <th scope="col" className="w-8 px-2 py-2">
+                    <input type="checkbox" aria-label={t("bulk.selectAll")} checked={allShownSelected} ref={(el) => {
+                      if (el) el.indeterminate = selectedRows.length > 0 && !allShownSelected;
+                    }} onChange={toggleAll} />
+                  </th>
+                )}
                 {COLUMNS.map((c) => {
                   const active = sort[0]?.field === c.sort;
                   return (
@@ -96,7 +124,12 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
                 const assignee = it.assignedToId ? userById.get(it.assignedToId) : undefined;
                 const overdue = isOverdue(it, qctx);
                 return (
-                  <tr key={it.id} className={`border-b border-line bg-white hover:bg-brand-soft/40 ${openId === it.id ? "bg-brand-soft" : ""}`}>
+                  <tr key={it.id} className={`border-b border-line bg-white hover:bg-brand-soft/40 ${openId === it.id || selection.has(it.id) ? "bg-brand-soft" : ""}`}>
+                    {canEdit && (
+                      <td className="px-2 py-1.5">
+                        <input type="checkbox" aria-label={t("bulk.selectRow", { id: it.id })} checked={selection.has(it.id)} onChange={() => toggleRow(it.id)} />
+                      </td>
+                    )}
                     <td className="px-2 py-1.5 font-semibold text-ink-muted">{it.id}</td>
                     <td className="px-2 py-1.5">
                       <span className="flex items-center gap-1.5 whitespace-nowrap">
@@ -135,6 +168,7 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
           {rows.length === 0 && <p className="p-6 text-center text-ink-muted">{t("list.empty")}</p>}
         </div>
       </main>
+      {bulkCreateOpen && <BulkCreateDialog items={items} onClose={() => setBulkCreateOpen(false)} onCreated={refresh} />}
       {(openId !== null || newDefaults) && (
         <ItemPanel
           key={openId ?? "new"}

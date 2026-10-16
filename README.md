@@ -3,7 +3,8 @@
 Lightweight, self-hosted test-tracking board for SIT/UAT phases in HR system
 implementations (e.g. SAP SuccessFactors), modelled on Azure Boards.
 
-> Work in progress: Phase 1 (work items & board) is done. A full README with
+> Work in progress: Phase 1 (work items & board) and Phase 2 (assignment,
+> collaboration, notifications) are done. A full README with
 > architecture and data model diagrams follows in the final phase.
 
 ## Quick start
@@ -31,9 +32,25 @@ Demo users (fictional) – password `demo1234` for all:
 | --- | --- |
 | `npm run dev` | Dev server |
 | `npm test` | Unit tests (Vitest) |
-| `npm run test:e2e` | Playwright smoke tests (needs `npx playwright install chromium`) |
+| `npm run test:e2e` | Playwright smoke tests (needs `npx playwright install chromium`, or set `PW_CHROMIUM_PATH` to an existing Chromium) |
 | `npm run db:seed` | Reset demo data |
 | `npm run typecheck` / `npm run lint` | Static checks |
+
+## Email notifications
+
+In-app notifications (bell, Notifications page, My work) always work. Email is
+off by default. To turn it on, set in `.env`:
+
+| Variable | Meaning |
+| --- | --- |
+| `EMAIL_NOTIFICATIONS_ENABLED` | `true` to send emails |
+| `EMAIL_TRANSPORT` | `console` (log to server output, default) or `file` (write `.eml` files) |
+| `EMAIL_OUTBOX_DIR` | Folder for the `file` transport (default `outbox`) |
+| `EMAIL_FROM` | Sender address |
+| `APP_URL` | Base URL used for links in emails |
+
+Users can opt out from their user menu. A real mail service (SMTP, SendGrid,
+Microsoft Graph) is added as a new transport in `src/server/email.ts`.
 
 ## Stack
 

@@ -4,10 +4,15 @@ import { getT } from "@/server/locale";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { UserMenu } from "@/components/UserMenu";
 import { SessionProvider } from "@/components/SessionProvider";
+import { NotificationBell } from "@/components/NotificationBell";
+import { db } from "@/server/db";
+import { unreadCount } from "@/server/notifications";
+import { emailEnabled } from "@/server/email";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const { t } = await getT();
+  const [unread, prefs] = await Promise.all([unreadCount(user.id), db.user.findUnique({ where: { id: user.id }, select: { emailNotifications: true } })]);
   return (
     <SessionProvider user={user}>
       <div className="flex min-h-full flex-col">
@@ -22,6 +27,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <span className="hidden sm:inline">{t("app.name")}</span>
           </Link>
           <nav aria-label="Global" className="flex items-center gap-1 text-sm">
+            <Link href="/my-work" className="rounded px-2 py-1 text-white/85 hover:bg-white/10 hover:text-white">
+              {t("nav.myWork")}
+            </Link>
             <Link href="/projects" className="rounded px-2 py-1 text-white/85 hover:bg-white/10 hover:text-white">
               {t("nav.projects")}
             </Link>
@@ -33,7 +41,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <LanguageToggle dark />
-            <UserMenu user={user} />
+            <NotificationBell initialUnread={unread} />
+            <UserMenu user={user} emailNotifications={prefs?.emailNotifications ?? true} emailServerEnabled={emailEnabled()} />
           </div>
         </header>
         <div id="main" className="flex min-h-0 flex-1 flex-col">

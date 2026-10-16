@@ -43,6 +43,7 @@ next-env.d.ts
 
 # testboard
 /uploads
+/outbox
 *.db
 *.db-journal
 /src/generated

@@ -102,3 +102,16 @@ export function canConfigure(role: Role | string): boolean {
 export function isAdmin(role: Role | string): boolean {
   return role === "ADMIN";
 }
+
+export interface NotificationView {
+  id: string;
+  /** ASSIGNED | MENTIONED | STATE_CHANGED | COMMENTED */
+  type: string;
+  message: string;
+  read: boolean;
+  createdAt: string;
+  workItemId: number | null;
+  itemTitle: string | null;
+  projectId: string | null;
+  actor: { id: string; name: string; color: string } | null;
+}

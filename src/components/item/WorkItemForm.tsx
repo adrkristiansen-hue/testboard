@@ -327,6 +327,11 @@ export function WorkItemForm(props: WorkItemFormProps) {
             </span>
           )}
           <div className="ml-auto flex items-center gap-1 normal-case">
+            {!isNew && detail && type?.key === "TEST_TASK" && canEdit && detail.item.fields.outcome === "Failed" && (
+              <button type="button" className="btn btn-sm btn-danger" onClick={createDefect}>
+                + {t("item.defectFromFailure")}
+              </button>
+            )}
             {!isNew && detail && (
               <button type="button" className={`btn btn-sm ${detail.following ? "btn-secondary" : "btn-ghost"}`} aria-pressed={detail.following} onClick={onFollow}>
                 {detail.following ? "★ " + t("item.unfollow") : "☆ " + t("item.follow")}

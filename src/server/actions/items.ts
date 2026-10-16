@@ -7,11 +7,13 @@ import { run, type ActionResult } from "../result";
 import { createWorkItem, updateWorkItem, UserError, type CreateItemInput, type FieldChange, type ItemPatch } from "../workitems";
 import { loadItemDetail } from "../items-detail";
 import { loadProjectMeta } from "../projects";
-import { notifyComment, follow } from "../notify";
+import { notifyComment, notifyBulkAssigned, follow } from "../notify";
 import { getStorage } from "../storage";
 import { parseStateMap, resolveMove, orderBetween } from "@/lib/board";
 import { docToText, isDocEmpty, sanitizeDoc, collectImageSrcs, type RtDoc } from "@/lib/richtext";
 import { extractMentions } from "@/lib/mentions";
+import { BULK_CREATE_MAX, bulkRowKey, expandBulkCreate } from "@/lib/bulkcreate";
+import { parseJsonObject, parseStringArray } from "@/lib/fields";
 import type { ItemDetail, LinkKind } from "@/lib/detail-types";
 
 export async function getItemDetail(id: number): Promise<ActionResult<ItemDetail>> {
@@ -44,15 +46,118 @@ export async function bulkUpdateItems(ids: number[], patch: ItemPatch): Promise<
     const user = await requireEditor();
     const errors: string[] = [];
     let updated = 0;
+    const assignedIds: number[] = [];
     for (const id of ids.slice(0, 1000)) {
       try {
-        const changes = await updateWorkItem(id, patch, user);
+        const changes = await updateWorkItem(id, patch, user, { suppressAssignedNotification: true });
         if (changes.length) updated++;
+        if (changes.some((c) => c.field === "assignedToId")) assignedIds.push(id);
       } catch (e) {
         errors.push(`#${id}: ${e instanceof Error ? e.message : "error"}`);
       }
     }
+    if (patch.assignedToId && assignedIds.length) await notifyBulkAssigned(user, new Map([[patch.assignedToId, assignedIds]]));
     return { updated, errors };
+  });
+}
+
+/** Add tags to many items, keeping each item's existing tags. */
+export async function bulkAddTags(ids: number[], tags: string[]): Promise<ActionResult<{ updated: number; errors: string[] }>> {
+  return run(async () => {
+    const user = await requireEditor();
+    const add = z.array(z.string().trim().min(1).max(50)).min(1).max(10).parse(tags);
+    const rows = await db.workItem.findMany({ where: { id: { in: ids.slice(0, 1000) } }, select: { id: true, tags: true } });
+    const errors: string[] = [];
+    let updated = 0;
+    for (const r of rows) {
+      try {
+        const changes = await updateWorkItem(r.id, { tags: [...parseStringArray(r.tags), ...add] }, user);
+        if (changes.length) updated++;
+      } catch (e) {
+        errors.push(`#${r.id}: ${e instanceof Error ? e.message : "error"}`);
+      }
+    }
+    return { updated, errors };
+  });
+}
+
+const bulkCreateSchema = z.object({
+  projectId: z.string(),
+  titles: z.array(z.string().max(255)).max(200),
+  moduleIds: z.array(z.string()).max(100),
+  phaseIds: z.array(z.string()).max(20),
+  pattern: z.string().max(255).optional(),
+  templateId: z.number().int().positive().nullable(),
+  assignedToId: z.string().nullable(),
+  priority: z.number().int().min(1).max(4).optional(),
+  skipExisting: z.boolean(),
+});
+
+/** Create one test task per title × module × phase, optionally copying steps from a template test task. */
+export async function bulkCreateTestTasks(input: z.infer<typeof bulkCreateSchema>): Promise<ActionResult<{ created: number; skipped: number; ids: number[] }>> {
+  return run(async () => {
+    const user = await requireConfigurer();
+    const spec = bulkCreateSchema.parse(input);
+    const meta = await loadProjectMeta(spec.projectId);
+    if (!meta) throw new UserError("Unknown project.");
+    const type = meta.types.find((t) => t.key === "TEST_TASK");
+    if (!type || type.disabled) throw new UserError("This project has no enabled Test task type.");
+
+    let template: { title: string; fields: Record<string, unknown>; tags: string[]; priority: number } | null = null;
+    if (spec.templateId) {
+      const row = await db.workItem.findFirst({ where: { id: spec.templateId, projectId: meta.id, typeId: type.id } });
+      if (!row) throw new UserError(`Template #${spec.templateId} is not a test task in this project.`);
+      const f = parseJsonObject(row.fields);
+      template = {
+        title: row.title,
+        // Copy the reusable parts of the test design, never the outcome of a previous run.
+        fields: Object.fromEntries(Object.entries(f).filter(([k]) => ["steps", "expectedResult", "testData"].includes(k))),
+        tags: parseStringArray(row.tags),
+        priority: row.priority,
+      };
+    }
+    const titles = spec.titles.some((t) => t.trim()) ? spec.titles : template ? [template.title] : [];
+    if (titles.length === 0) throw new UserError("Enter at least one title or choose a template.");
+    for (const id of spec.moduleIds) if (!meta.modules.some((m) => m.id === id)) throw new UserError("Unknown module.");
+    for (const id of spec.phaseIds) if (!meta.phases.some((p) => p.id === id)) throw new UserError("Unknown phase.");
+
+    const moduleName = (id: string) => meta.modules.find((m) => m.id === id)?.name ?? "";
+    const phaseName = (id: string) => meta.phases.find((p) => p.id === id)?.name ?? "";
+    const rows = expandBulkCreate({ titles, moduleIds: spec.moduleIds, phaseIds: spec.phaseIds, pattern: spec.pattern }, { module: moduleName, phase: phaseName });
+    if (rows.length > BULK_CREATE_MAX) throw new UserError(`At most ${BULK_CREATE_MAX} test tasks at a time (this would create ${rows.length}).`, "TOO_MANY");
+
+    let existing = new Set<string>();
+    if (spec.skipExisting) {
+      const current = await db.workItem.findMany({ where: { projectId: meta.id, typeId: type.id }, select: { title: true, moduleId: true, phaseId: true } });
+      existing = new Set(current.map(bulkRowKey));
+    }
+    const ids: number[] = [];
+    let skipped = 0;
+    for (const r of rows) {
+      if (existing.has(bulkRowKey(r))) {
+        skipped++;
+        continue;
+      }
+      const id = await createWorkItem(
+        {
+          projectId: meta.id,
+          typeId: type.id,
+          title: r.title,
+          moduleId: r.moduleId,
+          phaseId: r.phaseId,
+          assignedToId: spec.assignedToId,
+          priority: spec.priority ?? template?.priority ?? 2,
+          tags: template?.tags ?? [],
+          fields: structuredClone(template?.fields ?? {}),
+        },
+        user,
+        { suppressAssignedNotification: true },
+      );
+      ids.push(id);
+      existing.add(bulkRowKey(r));
+    }
+    if (spec.assignedToId && ids.length) await notifyBulkAssigned(user, new Map([[spec.assignedToId, ids]]));
+    return { created: ids.length, skipped, ids };
   });
 }
 
