@@ -82,3 +82,22 @@ test("dashboard shows KPIs and charts", async ({ page }) => {
   await page.getByLabel("Phase").selectOption({ label: "All phases" });
   await expect(page).toHaveURL(/phase=all/);
 });
+
+test("create a new board and open its report", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "+ New board" }).click();
+  const dialog = page.getByRole("dialog", { name: "New board" });
+  const name = unique("E2E board");
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByRole("group", { name: "Modules on this board" }).getByRole("checkbox", { name: "Recruiting" }).check();
+  await dialog.getByRole("button", { name: "Create board" }).click();
+  await expect(page.getByLabel("Choose a team board").locator("option:checked")).toHaveText(name);
+  // Copied columns from the current board
+  await expect(page.getByRole("heading", { name: "To do", exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: /Reports/ }).click();
+  await expect(page.getByRole("heading", { name: `Report: ${name}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Items per board column" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cumulative flow by board column" })).toBeVisible();
+  await expect(page.getByLabel("Board", { exact: true })).toHaveValue(/.+/);
+});

@@ -33,6 +33,7 @@ import { useToast } from "../ui/Toast";
 import { Card, type CardActions } from "./Card";
 import { CellList } from "./CellList";
 import { FilterBar } from "./FilterBar";
+import { NewBoardDialog } from "./NewBoardDialog";
 import { ItemPanel } from "../item/ItemPanel";
 
 export interface BoardProps {
@@ -97,6 +98,7 @@ export function Board(props: BoardProps) {
   }
 
   const [filter, setFilter] = useState<FilterState>(props.initialFilter);
+  const [newBoardOpen, setNewBoardOpen] = useState(false);
   const [openId, setOpenId] = useState<number | null>(props.initialOpenId);
   const [newDefaults, setNewDefaults] = useState<NewItemDefaults | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(props.swimlanes.collapsed ?? []));
@@ -420,6 +422,14 @@ export function Board(props: BoardProps) {
               ⚙
             </Link>
           )}
+          <Link href={`/p/${meta.id}/dashboard?board=${props.team.id}`} className="btn btn-ghost btn-sm">
+            ▥ {t("board.reports")}
+          </Link>
+          {canConfigure && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewBoardOpen(true)}>
+              + {t("newBoard.button")}
+            </button>
+          )}
           <div className="w-full lg:ml-2 lg:w-auto lg:flex-1">
             <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={visible.length} total={items.length} searchRef={searchRef} savedQueries={props.savedQueries} />
           </div>
@@ -547,6 +557,7 @@ export function Board(props: BoardProps) {
           }}
         />
       )}
+      {newBoardOpen && <NewBoardDialog boards={props.teams} currentBoardId={props.team.id} onClose={() => setNewBoardOpen(false)} />}
     </div>
   );
 }

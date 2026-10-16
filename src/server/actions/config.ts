@@ -177,6 +177,8 @@ const teamSchema = z.object({
   name: z.string().trim().min(1).max(80),
   memberIds: z.array(z.string()),
   modules: z.array(z.object({ moduleId: z.string(), includeChildren: z.boolean() })),
+  /** New boards only: copy columns, swimlanes and card settings from this board */
+  copyFromTeamId: z.string().optional(),
 });
 
 export async function saveTeam(projectId: string, input: z.infer<typeof teamSchema>): Promise<ActionResult<{ id: string }>> {
@@ -192,7 +194,19 @@ export async function saveTeam(projectId: string, input: z.infer<typeof teamSche
       const meta = await loadProjectMeta(projectId);
       if (!meta) throw new UserError("Unknown project.");
       const typeIds = new Map(meta.types.map((x) => [x.key, x.id]));
-      const team = await db.team.create({
+      const source = t.copyFromTeamId ? await db.team.findFirst({ where: { id: t.copyFromTeamId, projectId }, include: { columns: true } }) : null;
+      if (t.copyFromTeamId && !source) throw new UserError("The board to copy from was not found.");
+      const team = source
+        ? await db.team.create({
+            data: {
+              projectId,
+              name: t.name,
+              swimlanes: source.swimlanes,
+              cardConfig: source.cardConfig,
+              columns: { create: source.columns.map((c) => ({ name: c.name, order: c.order, wipLimit: c.wipLimit, split: c.split, stateMap: c.stateMap })) },
+            },
+          })
+        : await db.team.create({
         data: {
           projectId,
           name: t.name,

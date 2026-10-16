@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useId, useState, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { DashboardData } from "@/lib/dashboard";
-import { FLOW_CATEGORIES } from "@/lib/dashboard";
+import type { BoardReport, DashboardData } from "@/lib/dashboard";
+import { boardColumnColors, FLOW_CATEGORIES } from "@/lib/dashboard";
+import type { TeamLite } from "@/lib/types";
 import { TEST_OUTCOMES } from "@/lib/fields";
 import type { MessageKey } from "@/lib/i18n";
 import { formatDate } from "@/lib/format";
@@ -110,7 +111,23 @@ function LegendRow({ items }: { items: { label: string; color: string; dashed?: 
 
 const tooltipStyle = { contentStyle: { borderRadius: 6, border: "1px solid rgba(11,11,11,0.10)", fontSize: 12 }, cursor: { fill: "rgba(11,11,11,0.04)" } };
 
-export function Dashboard({ data, phaseId, flowType, flowDays, flowDayOptions }: { data: DashboardData; phaseId: string; flowType: string; flowDays: number; flowDayOptions: number[] }) {
+export function Dashboard({
+  data,
+  board,
+  boardReport,
+  phaseId,
+  flowType,
+  flowDays,
+  flowDayOptions,
+}: {
+  data: DashboardData;
+  board: TeamLite | null;
+  boardReport: BoardReport | null;
+  phaseId: string;
+  flowType: string;
+  flowDays: number;
+  flowDayOptions: number[];
+}) {
   const { t, locale } = useI18n();
   const { meta } = useProject();
   const router = useRouter();
@@ -130,7 +147,25 @@ export function Dashboard({ data, phaseId, flowType, flowDays, flowDayOptions }:
   return (
     <main className="w-full space-y-3 overflow-auto p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="mr-auto text-xl font-semibold">{t("nav.dashboard")}</h1>
+        <div className="mr-auto">
+          <h1 className="text-xl font-semibold">{board ? t("dash.boardReport", { board: board.name }) : t("nav.dashboard")}</h1>
+          {board && (
+            <Link href={`/p/${meta.id}/boards/${board.id}`} className="text-sm text-brand hover:underline">
+              ← {t("dash.openBoard")}
+            </Link>
+          )}
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          {t("dash.board")}
+          <select aria-label={t("dash.board")} className="rounded border border-line-strong bg-white px-2 py-1" value={board?.id ?? ""} onChange={(e) => setParam("board", e.target.value)}>
+            <option value="">{t("dash.wholeProject")}</option>
+            {meta.teams.map((tm) => (
+              <option key={tm.id} value={tm.id}>
+                {tm.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex items-center gap-2 text-sm">
           {t("field.phase")}
           <select className="rounded border border-line-strong bg-white px-2 py-1" value={phaseId} onChange={(e) => setParam("phase", e.target.value)}>
@@ -150,6 +185,8 @@ export function Dashboard({ data, phaseId, flowType, flowDays, flowDayOptions }:
         <Stat label={t("dash.passRate")} value={k.passRate === null ? "–" : `${k.passRate} %`} hint={t("dash.executedOf", { executed: k.testsExecuted, total: k.testsTotal })} />
         <Stat label={t("field.overdue")} value={k.overdue} tone="critical" />
       </div>
+
+      {board && boardReport && <BoardSection report={boardReport} flowType={flowType} />}
 
       <div className="grid gap-3 xl:grid-cols-2">
         <Card
@@ -325,5 +362,73 @@ export function Dashboard({ data, phaseId, flowType, flowDays, flowDayOptions }:
         </Card>
       </div>
     </main>
+  );
+}
+
+/** Charts that only make sense for a single board: its columns, WIP limits and flow through them. */
+function BoardSection({ report, flowType }: { report: BoardReport; flowType: string }) {
+  const { t, locale } = useI18n();
+  const { meta } = useProject();
+  const colors = boardColumnColors(report.columns.length);
+  const colorOf = new Map(report.columns.map((c, i) => [c.id, colors[i]]));
+  const shortDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(locale === "nb" ? "nb-NO" : "en-GB", { day: "numeric", month: "short" });
+  const over = report.columns.filter((c) => c.overLimit);
+  const typeName = flowType ? meta.types.find((ty) => ty.key === flowType)?.name : null;
+  return (
+    <div className="grid gap-3 xl:grid-cols-2">
+      <Card
+        title={t("dash.itemsPerColumn")}
+        subtitle={report.unmapped ? t("dash.unmappedHint", { count: report.unmapped }) : t("dash.itemsPerColumnHint")}
+        table={
+          <DataTable
+            head={[t("dash.column"), t("dash.count"), t("board.doing"), t("board.done"), t("dash.wipLimit")]}
+            rows={report.columns.map((c) => [c.name, c.count, c.doing, c.done, c.wipLimit ? `${c.wipLimit}${c.overLimit ? ` – ${t("dash.overLimit")}` : ""}` : "–"])}
+          />
+        }
+      >
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={report.columns} margin={{ top: 4, right: 8, bottom: 0, left: -16 }} barCategoryGap="30%">
+            <CartesianGrid vertical={false} stroke={GRID} />
+            <XAxis dataKey="name" tick={AXIS} tickLine={false} axisLine={{ stroke: "#c3c2b7" }} interval={0} tickFormatter={short} />
+            <YAxis allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
+            <Tooltip
+              {...tooltipStyle}
+              formatter={(v, _n, item) => {
+                const c = item.payload as BoardReport["columns"][number];
+                return [c.wipLimit ? `${v} / ${c.wipLimit}${c.overLimit ? ` (${t("dash.overLimit")})` : ""}` : String(v), t("dash.count")];
+              }}
+            />
+            <Bar dataKey="count" name={t("dash.count")} fill={SERIES_1} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+        {over.length > 0 && (
+          <p role="status" className="mt-1 flex items-center gap-1.5 text-xs text-ink">
+            <span aria-hidden="true" className="grid h-4 w-4 place-items-center rounded-full text-[10px] font-bold text-white" style={{ background: OUTCOME_STYLE.Failed.color }}>
+              !
+            </span>
+            {t("dash.overLimitList", { columns: over.map((c) => `${c.name} (${c.count}/${c.wipLimit})`).join(", ") })}
+          </p>
+        )}
+      </Card>
+      <Card
+        title={t("dash.flowByColumn")}
+        subtitle={typeName ? `${t("dash.flowByColumnHint")} · ${typeName}` : t("dash.flowByColumnHint")}
+        table={<DataTable head={[t("dash.date"), ...report.columns.map((c) => c.name)]} rows={report.flow.map((r) => [String(r.date), ...report.columns.map((c) => Number(r[c.id] ?? 0))])} />}
+      >
+        <ResponsiveContainer width="100%" height={240}>
+          <AreaChart data={report.flow} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+            <CartesianGrid vertical={false} stroke={GRID} />
+            <XAxis dataKey="date" tick={AXIS} tickLine={false} axisLine={{ stroke: "#c3c2b7" }} tickFormatter={shortDate} minTickGap={24} />
+            <YAxis allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={tooltipStyle.contentStyle} labelFormatter={(d) => shortDate(String(d))} />
+            {/* Last column (Done) at the bottom so finished work grows upward. */}
+            {[...report.columns].reverse().map((c) => (
+              <Area key={c.id} type="monotone" dataKey={c.id} name={c.name} stackId="b" stroke="#fff" strokeWidth={1} fill={colorOf.get(c.id)} fillOpacity={1} isAnimationActive={false} />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+        <LegendRow items={report.columns.map((c) => ({ label: c.name, color: colorOf.get(c.id)! }))} />
+      </Card>
+    </div>
   );
 }

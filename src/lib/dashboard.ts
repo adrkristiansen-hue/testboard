@@ -3,6 +3,7 @@ import type { ItemView, ProjectMeta } from "./types";
 import { categoryOf, isClosedCategory, type StateCategory } from "./workflow";
 import { isOverdue } from "./query";
 import { TEST_OUTCOMES, type TestOutcome } from "./fields";
+import { columnForItem, sortColumns, type ColumnDef } from "./board";
 
 /** State transitions from HistoryEntry (field "state" or "__created"). */
 export interface StateEvent {
@@ -218,4 +219,87 @@ export function computeDashboard(items: ItemView[], events: StateEvent[], meta: 
     flow,
     burndown,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Board reports: the same items as a team board, grouped by its columns.
+// ---------------------------------------------------------------------------
+
+export interface BoardReport {
+  columns: { id: string; name: string; count: number; doing: number; done: number; wipLimit: number | null; overLimit: boolean }[];
+  /** Items on the board whose state no column shows */
+  unmapped: number;
+  /** One row per day; keys are column ids */
+  flow: ({ date: string } & Record<string, number | string>)[];
+}
+
+export function computeBoardReport(
+  items: ItemView[],
+  events: StateEvent[],
+  columns: ColumnDef[],
+  o: Pick<DashboardOptions, "now" | "flowDays" | "flowType">,
+  types: Pick<ProjectMeta, "types">["types"],
+): BoardReport {
+  const cols = sortColumns(columns);
+  const counts = new Map(cols.map((c) => [c.id, { doing: 0, done: 0 }]));
+  let unmapped = 0;
+  for (const i of items) {
+    const c = columnForItem(i, cols);
+    if (!c) {
+      unmapped++;
+      continue;
+    }
+    const b = counts.get(c.id)!;
+    if (c.split && i.columnDone) b.done++;
+    else b.doing++;
+  }
+
+  const eventsByItem = new Map<number, StateEvent[]>();
+  for (const e of [...events].sort((a, b) => a.at.localeCompare(b.at))) {
+    const list = eventsByItem.get(e.itemId) ?? [];
+    list.push(e);
+    eventsByItem.set(e.itemId, list);
+  }
+  const typeKeys = new Map(types.map((t) => [t.id, t.key]));
+  const flowItems = o.flowType ? items.filter((i) => typeKeys.get(i.typeId) === o.flowType) : items;
+  const flow: BoardReport["flow"] = [];
+  for (let d = o.flowDays - 1; d >= 0; d--) {
+    const day = new Date(o.now.getFullYear(), o.now.getMonth(), o.now.getDate() - d);
+    const at = endOfDay(day);
+    const row: { date: string } & Record<string, number | string> = { date: dayKey(day) };
+    for (const c of cols) row[c.id] = 0;
+    for (const i of flowItems) {
+      const s = stateAt(i, eventsByItem.get(i.id) ?? [], at);
+      if (s === null) continue;
+      const c = columnForItem({ typeId: i.typeId, state: s }, cols);
+      if (c) row[c.id] = (row[c.id] as number) + 1;
+    }
+    flow.push(row);
+  }
+
+  return {
+    columns: cols.map((c) => {
+      const b = counts.get(c.id)!;
+      const count = b.doing + b.done;
+      return { id: c.id, name: c.name, count, doing: b.doing, done: b.done, wipLimit: c.wipLimit, overLimit: !!c.wipLimit && count > c.wipLimit };
+    }),
+    unmapped,
+    flow,
+  };
+}
+
+/**
+ * Colours for board columns (validated with the dataviz palette checker on white):
+ * up to 5 columns use the one-hue ordinal ramp (light = first column, dark = last);
+ * 6-8 columns can't stay distinguishable on one hue, so they use the categorical palette in fixed order;
+ * columns past 8 fall back to neutral grey (the table view still separates them).
+ */
+const ORDINAL_5 = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"];
+const CATEGORICAL_8 = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+export function boardColumnColors(n: number): string[] {
+  if (n <= 5) {
+    if (n <= 1) return [ORDINAL_5[2]];
+    return Array.from({ length: n }, (_, i) => ORDINAL_5[Math.round((i * 4) / (n - 1))]);
+  }
+  return Array.from({ length: n }, (_, i) => CATEGORICAL_8[i] ?? "#c3c2b7");
 }
