@@ -3,8 +3,9 @@
 Lightweight, self-hosted test-tracking board for SIT/UAT phases in HR system
 implementations (e.g. SAP SuccessFactors), modelled on Azure Boards.
 
-> Work in progress: Phase 1 (work items & board) and Phase 2 (assignment,
-> collaboration, notifications) are done. A full README with
+> Work in progress: Phase 1 (work items & board), Phase 2 (assignment,
+> collaboration, notifications) and Phase 3 (lists, queries, dashboard,
+> export) are done. A full README with
 > architecture and data model diagrams follows in the final phase.
 
 ## Quick start
@@ -35,6 +36,14 @@ Demo users (fictional) – password `demo1234` for all:
 | `npm run test:e2e` | Playwright smoke tests (needs `npx playwright install chromium`, or set `PW_CHROMIUM_PATH` to an existing Chromium) |
 | `npm run db:seed` | Reset demo data |
 | `npm run typecheck` / `npm run lint` | Static checks |
+
+## Exports
+
+Work item lists and query results export to Excel (.xlsx) or CSV with the
+columns and rows currently shown. CSV is UTF-8 with BOM and uses `;` as
+separator when the UI language is Norwegian (Norwegian Excel default) and `,`
+in English. Cells that start with `=`, `+`, `-` or `@` are prefixed with `'` so
+spreadsheet apps never run them as formulas.
 
 ## Email notifications
 

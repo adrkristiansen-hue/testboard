@@ -12,6 +12,8 @@ export interface FilterState {
   states: string[];
   tags: string[];
   priorities: number[];
+  /** Saved query id applied on top of the other filters ("" = none) */
+  query: string;
 }
 
 export const EMPTY_FILTER: FilterState = {
@@ -23,6 +25,7 @@ export const EMPTY_FILTER: FilterState = {
   states: [],
   tags: [],
   priorities: [],
+  query: "",
 };
 
 export function isFilterActive(f: FilterState): boolean {
@@ -34,12 +37,18 @@ export function isFilterActive(f: FilterState): boolean {
     f.phases.length > 0 ||
     f.states.length > 0 ||
     f.tags.length > 0 ||
-    f.priorities.length > 0
+    f.priorities.length > 0 ||
+    f.query !== ""
   );
 }
 
-export function filterToQuery(f: FilterState): QueryDefinition {
+/** `savedQuery` resolves a saved query id to its definition (only its conditions are used, not its sort). */
+export function filterToQuery(f: FilterState, savedQuery?: (id: string) => QueryDefinition | undefined): QueryDefinition {
   const clauses: Clause[] = [];
+  if (f.query) {
+    const saved = savedQuery?.(f.query);
+    if (saved) clauses.push(saved.root);
+  }
   const kw = f.keyword.trim();
   if (kw) {
     // "#123" or "123" matches the id exactly; otherwise all words must appear.
@@ -77,6 +86,7 @@ export function filterToParams(f: FilterState): URLSearchParams {
   if (f.states.length) p.set("state", f.states.join(","));
   if (f.tags.length) p.set("tag", f.tags.join(","));
   if (f.priorities.length) p.set("priority", f.priorities.join(","));
+  if (f.query) p.set("query", f.query);
   return p;
 }
 
@@ -96,5 +106,6 @@ export function filterFromParams(p: URLSearchParams | Record<string, string | st
     states: list("state"),
     tags: list("tag"),
     priorities: list("priority").map(Number).filter((n) => !Number.isNaN(n)),
+    query: get("query"),
   };
 }

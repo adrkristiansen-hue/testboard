@@ -17,7 +17,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import type { ItemView, TeamLite } from "@/lib/types";
+import type { ItemView, TeamLite, SavedQueryView } from "@/lib/types";
 import { columnForItem, placeItems, resolveMove, sortColumns, wipStatus, orderBetween, type ColumnDef } from "@/lib/board";
 import { buildLanes, groupByLane, laneKeyForItem, visibleLanes, type Lane, type LaneContext, type SwimlaneConfig } from "@/lib/swimlanes";
 import { cardStyle, type CardConfig } from "@/lib/cards";
@@ -46,6 +46,7 @@ export interface BoardProps {
   defaults: { moduleId: string | null; phaseId: string | null };
   initialFilter: FilterState;
   initialOpenId: number | null;
+  savedQueries?: SavedQueryView[];
 }
 
 const cellKey = (lane: string, col: string, done: boolean) => `${lane}|${col}|${done ? 1 : 0}`;
@@ -123,7 +124,12 @@ export function Board(props: BoardProps) {
     [meta.modules, meta.users, qctx, t],
   );
 
-  const visible = useMemo(() => (isFilterActive(filter) ? runQuery(items, filterToQuery(filter), qctx) : items), [items, filter, qctx]);
+  const savedQueries = props.savedQueries;
+  const visible = useMemo(() => {
+    if (!isFilterActive(filter)) return items;
+    const saved = new Map((savedQueries ?? []).map((q) => [q.id, q.definition]));
+    return runQuery(items, filterToQuery(filter, (id) => saved.get(id)), qctx);
+  }, [items, filter, qctx, savedQueries]);
   const allLanes = useMemo(() => buildLanes(props.swimlanes, laneCtx), [props.swimlanes, laneCtx]);
   const grouped = useMemo(() => groupByLane(visible, props.swimlanes, laneCtx), [visible, props.swimlanes, laneCtx]);
   const memberSet = useMemo(() => new Set(props.memberIds), [props.memberIds]);
@@ -415,7 +421,7 @@ export function Board(props: BoardProps) {
             </Link>
           )}
           <div className="w-full lg:ml-2 lg:w-auto lg:flex-1">
-            <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={visible.length} total={items.length} searchRef={searchRef} />
+            <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={visible.length} total={items.length} searchRef={searchRef} savedQueries={props.savedQueries} />
           </div>
         </div>
         {unmapped > 0 && (

@@ -113,3 +113,23 @@ describe("card colour rules", () => {
     expect(cardStyle(item(), DEFAULT_CARD_CONFIG.rules, c).matched).toEqual([]);
   });
 });
+
+describe("saved query as filter", async () => {
+  const { filterToQuery, EMPTY_FILTER, filterFromParams, filterToParams } = await import("@/lib/filters");
+  const { runQuery } = await import("@/lib/query");
+  const { ctx, item } = await import("./fixtures");
+  const items = [item({ priority: 1, title: "Alpha" }), item({ priority: 3, title: "Alpha two" }), item({ priority: 1, title: "Beta" })];
+  const saved = { root: { logic: "and" as const, clauses: [{ field: "priority", op: "eq" as const, value: 1 }] } };
+
+  it("combines a saved query with other filters", () => {
+    const def = filterToQuery({ ...EMPTY_FILTER, query: "q1", keyword: "alpha" }, (id) => (id === "q1" ? saved : undefined));
+    expect(runQuery(items, def, ctx()).map((i) => i.title)).toEqual(["Alpha"]);
+  });
+  it("ignores unknown saved query ids", () => {
+    const def = filterToQuery({ ...EMPTY_FILTER, query: "gone" }, () => undefined);
+    expect(runQuery(items, def, ctx())).toHaveLength(3);
+  });
+  it("round-trips through URL params", () => {
+    expect(filterFromParams(filterToParams({ ...EMPTY_FILTER, query: "q1" })).query).toBe("q1");
+  });
+});

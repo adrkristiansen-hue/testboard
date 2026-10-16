@@ -49,6 +49,7 @@ export function FilterBar({
   shown,
   total,
   searchRef,
+  savedQueries,
 }: {
   value: FilterState;
   onChange: (f: FilterState) => void;
@@ -56,6 +57,8 @@ export function FilterBar({
   shown: number;
   total: number;
   searchRef?: React.RefObject<HTMLInputElement | null>;
+  /** Saved queries offered as an extra filter (board and list). */
+  savedQueries?: { id: string; name: string; shared: boolean }[];
 }) {
   const t = useT();
   const { meta } = useProject();
@@ -103,6 +106,22 @@ export function FilterBar({
         selected={value.priorities.map(String)}
         onChange={(p) => onChange({ ...value, priorities: p.map(Number) })}
       />
+      {savedQueries && savedQueries.length > 0 && (
+        <select
+          aria-label={t("filter.query")}
+          className={`rounded border px-2 py-1 text-sm ${value.query ? "border-brand bg-brand-soft text-brand-dark" : "border-line-strong bg-white"}`}
+          value={value.query}
+          onChange={(e) => onChange({ ...value, query: e.target.value })}
+        >
+          <option value="">{t("filter.noQuery")}</option>
+          {savedQueries.map((q) => (
+            <option key={q.id} value={q.id}>
+              {q.shared ? "👥 " : ""}
+              {q.name}
+            </option>
+          ))}
+        </select>
+      )}
       {isFilterActive(value) && (
         <>
           <button type="button" className="btn btn-ghost btn-sm text-brand" onClick={() => onChange(EMPTY_FILTER)}>

@@ -14,6 +14,8 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const links = [
     { href: `/p/${projectId}/boards`, label: t("nav.board"), icon: "▦" },
     { href: `/p/${projectId}/items`, label: t("nav.items"), icon: "☰" },
+    { href: `/p/${projectId}/queries`, label: t("nav.queries"), icon: "⌕" },
+    { href: `/p/${projectId}/dashboard`, label: t("nav.dashboard"), icon: "▥" },
     ...(canConfigure(user.role) ? [{ href: `/p/${projectId}/settings`, label: t("nav.settings"), icon: "⚙" }] : []),
   ];
   return (

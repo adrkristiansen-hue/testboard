@@ -115,3 +115,15 @@ export interface NotificationView {
   projectId: string | null;
   actor: { id: string; name: string; color: string } | null;
 }
+
+export interface SavedQueryView {
+  id: string;
+  name: string;
+  shared: boolean;
+  mode: "FLAT" | "TREE";
+  definition: import("./query").QueryDefinition;
+  columns: string[];
+  ownerId: string;
+  ownerName: string;
+  updatedAt: string;
+}

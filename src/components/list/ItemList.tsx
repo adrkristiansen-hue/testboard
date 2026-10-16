@@ -1,40 +1,43 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { ItemView } from "@/lib/types";
+import type { ItemView, SavedQueryView } from "@/lib/types";
 import { filterToParams, filterToQuery, isFilterActive, type FilterState } from "@/lib/filters";
-import { isOverdue, runQuery, sortItems, type SortSpec } from "@/lib/query";
-import type { MessageKey } from "@/lib/i18n";
+import { runQuery, sortItems, type SortSpec } from "@/lib/query";
+import { columnCatalogue, columnsToParam, DEFAULT_COLUMNS, resolveColumns } from "@/lib/columns";
 import type { NewItemDefaults } from "@/lib/prefill";
-import { formatDate } from "@/lib/format";
 import { useProject } from "../ProjectProvider";
 import { useI18n } from "../I18nProvider";
 import { useSessionUser } from "../SessionProvider";
 import { FilterBar } from "../board/FilterBar";
 import { ItemPanel } from "../item/ItemPanel";
-import { TypeIcon, StateDot } from "../ui/TypeIcon";
-import { Avatar } from "../ui/Avatar";
 import { BulkBar } from "./BulkBar";
 import { BulkCreateDialog } from "./BulkCreateDialog";
+import { ItemTable } from "./ItemTable";
+import { ColumnChooser } from "./ColumnChooser";
+import { ExportMenu } from "./ExportMenu";
 
-const COLUMNS: { key: string; label: MessageKey; sort: string }[] = [
-  { key: "id", label: "field.id", sort: "id" },
-  { key: "type", label: "field.type", sort: "type" },
-  { key: "title", label: "field.title", sort: "title" },
-  { key: "state", label: "field.state", sort: "state" },
-  { key: "assignedTo", label: "field.assignedTo", sort: "assignedTo" },
-  { key: "module", label: "field.module", sort: "module" },
-  { key: "phase", label: "field.phase", sort: "phase" },
-  { key: "priority", label: "field.priority", sort: "priority" },
-  { key: "severity", label: "field.severity", sort: "severity" },
-  { key: "dueDate", label: "field.dueDate", sort: "dueDate" },
-  { key: "changedAt", label: "field.changedAt", sort: "changedAt" },
-];
+const colsStorageKey = (projectId: string) => `tb.listColumns.${projectId}`;
 
-export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemView[]; initialFilter: FilterState; initialOpenId: number | null }) {
-  const { t, locale } = useI18n();
-  const { typeById, userById, moduleById, phaseById, queryContext } = useProject();
+export function ItemList({
+  items,
+  savedQueries,
+  initialFilter,
+  initialOpenId,
+  initialColumns,
+  initialMode,
+}: {
+  items: ItemView[];
+  savedQueries: SavedQueryView[];
+  initialFilter: FilterState;
+  initialOpenId: number | null;
+  initialColumns?: string[];
+  initialMode: "flat" | "tree";
+}) {
+  const { t } = useI18n();
+  const { meta, queryContext } = useProject();
   const { user, canEdit, canConfigure } = useSessionUser();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -42,27 +45,54 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
   const [sort, setSort] = useState<SortSpec[]>([{ field: "id", dir: "desc" }]);
   const [openId, setOpenId] = useState<number | null>(initialOpenId);
   const [newDefaults, setNewDefaults] = useState<NewItemDefaults | null>(null);
+  const [columnKeys, setColumnKeys] = useState<string[]>(initialColumns ?? DEFAULT_COLUMNS);
+  const [mode, setMode] = useState<"flat" | "tree">(initialMode);
   const searchRef = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<Set<number>>(() => new Set());
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
 
+  // Columns: URL wins, otherwise the last choice in this browser.
+  useEffect(() => {
+    if (initialColumns) return;
+    try {
+      const stored = localStorage.getItem(colsStorageKey(meta.id));
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from browser storage after hydration
+      if (stored) setColumnKeys(JSON.parse(stored));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [initialColumns, meta.id]);
+
+  const changeColumns = (keys: string[]) => {
+    setColumnKeys(keys);
+    try {
+      localStorage.setItem(colsStorageKey(meta.id), JSON.stringify(keys));
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
   useEffect(() => {
     const p = filterToParams(filter);
+    if (mode === "tree") p.set("view", "tree");
+    if (columnKeys.join(",") !== DEFAULT_COLUMNS.join(",")) p.set("cols", columnsToParam(columnKeys));
     if (openId) p.set("item", String(openId));
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [filter, openId]);
+  }, [filter, openId, mode, columnKeys]);
 
+  const catalogue = useMemo(() => columnCatalogue(meta), [meta]);
+  const columns = useMemo(() => resolveColumns(columnKeys, catalogue), [columnKeys, catalogue]);
   const qctx = useMemo(() => queryContext(user.id), [queryContext, user.id]);
+  const savedById = useMemo(() => new Map(savedQueries.map((q) => [q.id, q.definition])), [savedQueries]);
   const rows = useMemo(() => {
-    const filtered = isFilterActive(filter) ? runQuery(items, filterToQuery(filter), qctx) : items;
+    const filtered = isFilterActive(filter) ? runQuery(items, filterToQuery(filter, (id) => savedById.get(id)), qctx) : items;
     return sortItems(filtered, sort, qctx);
-  }, [items, filter, sort, qctx]);
+  }, [items, filter, sort, qctx, savedById]);
   const allTags = useMemo(() => [...new Set(items.flatMap((i) => i.tags))].sort(), [items]);
   const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
   // Only rows that are currently shown count as selected, so hidden rows are never bulk-edited by accident.
   const selectedRows = useMemo(() => rows.filter((r) => selection.has(r.id)), [rows, selection]);
-  const allShownSelected = rows.length > 0 && selectedRows.length === rows.length;
   const toggleRow = (id: number) =>
     setSelection((s) => {
       const n = new Set(s);
@@ -70,9 +100,19 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
       else n.add(id);
       return n;
     });
-  const toggleAll = () => setSelection(allShownSelected ? new Set() : new Set(rows.map((r) => r.id)));
-
+  const toggleAll = () => setSelection(selectedRows.length === rows.length ? new Set() : new Set(rows.map((r) => r.id)));
   const toggleSort = (field: string) => setSort((s) => (s[0]?.field === field ? [{ field, dir: s[0].dir === "asc" ? "desc" : "asc" }] : [{ field, dir: "asc" }]));
+
+  // "Save as query" carries the current filter, sort and columns to the query editor.
+  const saveAsQueryHref = useMemo(() => {
+    const def = { ...filterToQuery({ ...filter, query: "" }), sort };
+    const base = filter.query ? savedById.get(filter.query) : undefined;
+    if (base) def.root = { logic: "and", clauses: [base.root, ...def.root.clauses] };
+    const p = new URLSearchParams({ def: JSON.stringify(def), cols: columnKeys.join(","), mode: mode === "tree" ? "TREE" : "FLAT" });
+    return `/p/${meta.id}/queries/new?${p}`;
+  }, [filter, sort, columnKeys, mode, meta.id, savedById]);
+
+  const modeBtn = (m: "flat" | "tree") => `px-2 py-1 text-sm ${mode === m ? "bg-brand-soft font-semibold text-brand-dark" : "bg-white hover:bg-gray-50"}`;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -90,81 +130,40 @@ export function ItemList({ items, initialFilter, initialOpenId }: { items: ItemV
             </button>
           )}
           <div className="w-full lg:w-auto lg:flex-1">
-            <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={rows.length} total={items.length} searchRef={searchRef} />
+            <FilterBar value={filter} onChange={setFilter} allTags={allTags} shown={rows.length} total={items.length} searchRef={searchRef} savedQueries={savedQueries} />
+          </div>
+          <div className="flex items-center gap-1">
+            <div role="group" aria-label={t("query.mode")} className="flex overflow-hidden rounded border border-line-strong">
+              <button type="button" className={modeBtn("flat")} aria-pressed={mode === "flat"} onClick={() => setMode("flat")}>
+                {t("list.flat")}
+              </button>
+              <button type="button" className={modeBtn("tree")} aria-pressed={mode === "tree"} onClick={() => setMode("tree")}>
+                {t("list.tree")}
+              </button>
+            </div>
+            <ColumnChooser catalogue={catalogue} value={columnKeys} onChange={changeColumns} />
+            <ExportMenu ids={rows.map((r) => r.id)} columns={columns.map((c) => c.key)} />
+            <Link href={saveAsQueryHref} className="btn btn-ghost btn-sm">
+              {t("list.saveAsQuery")}
+            </Link>
           </div>
         </div>
         {canEdit && selectedRows.length > 0 && <BulkBar selected={selectedRows} onClear={() => setSelection(new Set())} onDone={refresh} />}
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_var(--color-line)]">
-              <tr>
-                {canEdit && (
-                  <th scope="col" className="w-8 px-2 py-2">
-                    <input type="checkbox" aria-label={t("bulk.selectAll")} checked={allShownSelected} ref={(el) => {
-                      if (el) el.indeterminate = selectedRows.length > 0 && !allShownSelected;
-                    }} onChange={toggleAll} />
-                  </th>
-                )}
-                {COLUMNS.map((c) => {
-                  const active = sort[0]?.field === c.sort;
-                  return (
-                    <th key={c.key} scope="col" aria-sort={active ? (sort[0].dir === "asc" ? "ascending" : "descending") : "none"} className="whitespace-nowrap px-2 py-2 text-left text-xs font-semibold text-ink-muted">
-                      <button type="button" className="hover:text-ink" onClick={() => toggleSort(c.sort)}>
-                        {t(c.label)} {active ? (sort[0].dir === "asc" ? "▲" : "▼") : ""}
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((it) => {
-                const type = typeById.get(it.typeId);
-                const st = type?.states.find((s) => s.name === it.state);
-                const assignee = it.assignedToId ? userById.get(it.assignedToId) : undefined;
-                const overdue = isOverdue(it, qctx);
-                return (
-                  <tr key={it.id} className={`border-b border-line bg-white hover:bg-brand-soft/40 ${openId === it.id || selection.has(it.id) ? "bg-brand-soft" : ""}`}>
-                    {canEdit && (
-                      <td className="px-2 py-1.5">
-                        <input type="checkbox" aria-label={t("bulk.selectRow", { id: it.id })} checked={selection.has(it.id)} onChange={() => toggleRow(it.id)} />
-                      </td>
-                    )}
-                    <td className="px-2 py-1.5 font-semibold text-ink-muted">{it.id}</td>
-                    <td className="px-2 py-1.5">
-                      <span className="flex items-center gap-1.5 whitespace-nowrap">
-                        <TypeIcon type={type} size={14} />
-                        {type?.name}
-                      </span>
-                    </td>
-                    <td className="max-w-md px-2 py-1.5">
-                      <button type="button" className="text-left font-medium hover:underline" onClick={() => { setNewDefaults(null); setOpenId(it.id); }}>
-                        {it.title}
-                      </button>
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <span className="flex items-center gap-1.5">
-                        <StateDot color={st?.color ?? "#999"} />
-                        {it.state}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <span className="flex items-center gap-1.5">
-                        <Avatar user={assignee} size={20} />
-                        {assignee?.name ?? <span className="text-ink-muted">{t("common.unassigned")}</span>}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5">{it.moduleId ? moduleById.get(it.moduleId)?.path : ""}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5">{it.phaseId ? phaseById.get(it.phaseId)?.name : ""}</td>
-                    <td className="px-2 py-1.5">{it.priority}</td>
-                    <td className="px-2 py-1.5">{it.severity ?? ""}</td>
-                    <td className={`whitespace-nowrap px-2 py-1.5 ${overdue ? "font-semibold text-danger" : ""}`}>{formatDate(it.dueDate, locale)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-ink-muted">{formatDate(it.changedAt, locale)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <ItemTable
+            rows={rows}
+            allItems={items}
+            columns={columns}
+            mode={mode}
+            sort={sort}
+            onSort={toggleSort}
+            openId={openId}
+            onOpen={(id) => { setNewDefaults(null); setOpenId(id); }}
+            onChanged={refresh}
+            selection={selection}
+            onToggleRow={toggleRow}
+            onToggleAll={toggleAll}
+          />
           {rows.length === 0 && <p className="p-6 text-center text-ink-muted">{t("list.empty")}</p>}
         </div>
       </main>
