@@ -5,6 +5,7 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { UserMenu } from "@/components/UserMenu";
 import { SessionProvider } from "@/components/SessionProvider";
 import { NotificationBell } from "@/components/NotificationBell";
+import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { db } from "@/server/db";
 import { unreadCount } from "@/server/notifications";
 import { emailEnabled } from "@/server/email";
@@ -48,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div id="main" className="flex min-h-0 flex-1 flex-col">
           {children}
         </div>
+        <KeyboardHelp />
       </div>
     </SessionProvider>
   );

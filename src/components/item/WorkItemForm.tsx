@@ -28,6 +28,7 @@ import { Discussion } from "./Discussion";
 import { History } from "./History";
 import { Links } from "./Links";
 import { Attachments } from "./Attachments";
+import { useShortcuts } from "../useShortcuts";
 
 interface Draft {
   typeId: string;
@@ -123,6 +124,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
   // Remount rich text editors when the underlying item reloads from the server.
   const [editorGen, setEditorGen] = useState(0);
   const titleRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const isNew = itemId === null;
 
@@ -266,6 +268,35 @@ export function WorkItemForm(props: WorkItemFormProps) {
     else router.push(`/p/${meta.id}/items`);
   };
 
+  // "e" edits the title, "a" assigns to me; Ctrl/Cmd+Enter saves even while typing.
+  useShortcuts(
+    {
+      e: () => {
+        titleRef.current?.focus();
+        titleRef.current?.select();
+      },
+      a: () => {
+        if (draft && draft.assignedToId !== user.id) set("assignedToId", user.id);
+      },
+    },
+    canEdit,
+  );
+  const saveRef = useRef(save);
+  useEffect(() => {
+    saveRef.current = save;
+  });
+  useEffect(() => {
+    if (!canEdit) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && rootRef.current?.contains(document.activeElement)) {
+        e.preventDefault();
+        void saveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canEdit]);
+
   const createDefect = () => {
     if (!detail) return;
     const defaults = defectDefaultsFromTest(detail.item, meta.types);
@@ -305,7 +336,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
   const idp = `wi-${itemId ?? "new"}`;
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col bg-canvas">
+    <div ref={rootRef} className="@container flex h-full min-h-0 flex-col bg-canvas">
       {/* Header */}
       <div className="border-b border-line bg-white px-4 pb-2 pt-3" style={{ borderTop: `4px solid ${type?.color ?? "#999"}` }}>
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">

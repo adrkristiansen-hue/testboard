@@ -472,6 +472,17 @@ const en = {
   "template.adminHint": "Templates are created from Project settings → General. New projects can start from a template.",
   "template.invalid": "Unreadable template",
   "template.empty": "No templates yet.",
+  "keys.title": "Keyboard shortcuts",
+  "keys.global": "Everywhere",
+  "keys.boardList": "Boards and lists",
+  "keys.item": "Open work item",
+  "keys.help": "Show this list",
+  "keys.new": "New work item",
+  "keys.filter": "Filter by keyword",
+  "keys.edit": "Edit the title",
+  "keys.assignMe": "Assign to me",
+  "keys.save": "Save",
+  "keys.close": "Close the panel",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -943,6 +954,17 @@ const nb: Partial<Dictionary> = {
   "template.adminHint": "Maler lages fra Prosjektinnstillinger → Generelt. Nye prosjekter kan starte fra en mal.",
   "template.invalid": "Uleselig mal",
   "template.empty": "Ingen maler ennå.",
+  "keys.title": "Hurtigtaster",
+  "keys.global": "Overalt",
+  "keys.boardList": "Tavler og lister",
+  "keys.item": "Åpent arbeidselement",
+  "keys.help": "Vis denne listen",
+  "keys.new": "Nytt arbeidselement",
+  "keys.filter": "Filtrer på nøkkelord",
+  "keys.edit": "Rediger tittelen",
+  "keys.assignMe": "Tildel meg",
+  "keys.save": "Lagre",
+  "keys.close": "Lukk panelet",
 };
 
 export function getDictionary(locale: Locale): Dictionary {

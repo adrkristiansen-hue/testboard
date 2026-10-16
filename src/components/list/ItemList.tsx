@@ -18,6 +18,7 @@ import { BulkCreateDialog } from "./BulkCreateDialog";
 import { ItemTable } from "./ItemTable";
 import { ColumnChooser } from "./ColumnChooser";
 import { ExportMenu } from "./ExportMenu";
+import { useShortcuts } from "../useShortcuts";
 
 const colsStorageKey = (projectId: string) => `tb.listColumns.${projectId}`;
 
@@ -101,6 +102,14 @@ export function ItemList({
       return n;
     });
   const toggleAll = () => setSelection(selectedRows.length === rows.length ? new Set() : new Set(rows.map((r) => r.id)));
+  useShortcuts({
+    "/": () => searchRef.current?.focus(),
+    n: () => {
+      if (!canEdit) return;
+      setOpenId(null);
+      setNewDefaults({});
+    },
+  });
   const toggleSort = (field: string) => setSort((s) => (s[0]?.field === field ? [{ field, dir: s[0].dir === "asc" ? "desc" : "asc" }] : [{ field, dir: "asc" }]));
 
   // "Save as query" carries the current filter, sort and columns to the query editor.

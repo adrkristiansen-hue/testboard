@@ -37,6 +37,9 @@ export function UserMenu({ user, emailNotifications, emailServerEnabled }: { use
           <Link href="/account/tokens" className="block border-t border-line px-2 py-1.5 text-sm hover:bg-brand-soft">
             {t("nav.apiTokens")}
           </Link>
+          <button type="button" className="w-full px-2 py-1.5 text-left text-sm hover:bg-brand-soft" onClick={() => window.dispatchEvent(new Event("tb:shortcuts"))}>
+            {t("keys.title")} <kbd className="ml-1 rounded border border-line-strong px-1 font-mono text-xs">?</kbd>
+          </button>
           <form action={logout} className="border-t border-line pt-1">
             <button type="submit" className="w-full rounded px-2 py-1.5 text-left hover:bg-brand-soft">
               {t("nav.signOut")}

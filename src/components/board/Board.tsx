@@ -34,6 +34,7 @@ import { Card, type CardActions } from "./Card";
 import { CellList } from "./CellList";
 import { FilterBar } from "./FilterBar";
 import { NewBoardDialog } from "./NewBoardDialog";
+import { useShortcuts } from "../useShortcuts";
 import { ItemPanel } from "../item/ItemPanel";
 
 export interface BoardProps {
@@ -326,19 +327,16 @@ export function Board(props: BoardProps) {
     performMove(item, target.column, target.done, target.lane, before, after);
   };
 
-  // Keyboard: "/" focuses the filter, Escape closes the panel (handled in ItemPanel)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el.closest("input, textarea, select, [contenteditable=true]")) return;
-      if (e.key === "/") {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // Keyboard: "/" focuses the filter, "n" creates an item; Escape closes the panel (handled in ItemPanel)
+  useShortcuts({
+    "/": () => searchRef.current?.focus(),
+    n: () => {
+      if (!canEdit) return;
+      returnFocus.current = document.activeElement as HTMLElement;
+      setOpenId(null);
+      setNewDefaults({ moduleId: props.defaults.moduleId, phaseId: props.defaults.phaseId });
+    },
+  });
 
   const closePanel = () => {
     setOpenId(null);
