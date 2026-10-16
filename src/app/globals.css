@@ -7,13 +7,13 @@
   --color-ink-muted: #5b6474;
   --color-line: #dfe3e8;
   --color-line-strong: #c3c9d1;
-  --color-brand: #0f62fe;
+  --color-brand: #0d5bdd; /* 5.1:1 on brand-soft, 5.9:1 under white text (WCAG AA) */
   --color-brand-dark: #0043ce;
   --color-brand-soft: #e5efff;
   --color-danger: #c81e1e;
-  --color-warn: #b45309;
+  --color-warn: #a34807;
   --color-warn-soft: #fff4e5;
-  --color-ok: #15803d;
+  --color-ok: #126b33;
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 

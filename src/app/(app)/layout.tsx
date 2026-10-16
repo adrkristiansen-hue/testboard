@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [unread, prefs] = await Promise.all([unreadCount(user.id), db.user.findUnique({ where: { id: user.id }, select: { emailNotifications: true } })]);
   return (
     <SessionProvider user={user}>
-      <div className="flex min-h-full flex-col">
+      <div className="flex h-dvh flex-col">
         <a href="#main" className="sr-only-focusable fixed left-2 top-2 z-[200] rounded bg-white px-3 py-2 font-semibold text-brand shadow">
           {t("nav.skipToContent")}
         </a>
@@ -46,7 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <UserMenu user={user} emailNotifications={prefs?.emailNotifications ?? true} emailServerEnabled={emailEnabled()} />
           </div>
         </header>
-        <div id="main" className="flex min-h-0 flex-1 flex-col">
+        <div id="main" className="flex min-h-0 flex-1 flex-col overflow-auto">
           {children}
         </div>
         <KeyboardHelp />

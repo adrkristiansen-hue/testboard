@@ -35,6 +35,7 @@ export function QueryEditor({ query, isNew, items }: { query: SavedQueryView; is
   const [columnKeys, setColumnKeys] = useState(query.columns);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tableScrollEl, setTableScrollEl] = useState<HTMLDivElement | null>(null);
 
   const canSave = isNew || query.ownerId === user.id || (query.shared && canConfigure);
   const catalogue = useMemo(() => columnCatalogue(meta), [meta]);
@@ -92,6 +93,7 @@ export function QueryEditor({ query, isNew, items }: { query: SavedQueryView; is
             <Link href={`/p/${meta.id}/queries`} className="text-sm text-brand hover:underline">
               ← {t("nav.queries")}
             </Link>
+            <h1 className="sr-only">{isNew ? t("query.new") : `${t("nav.queries")}: ${query.name}`}</h1>
             <label htmlFor="q-name" className="sr-only">
               {t("common.name")}
             </label>
@@ -185,8 +187,9 @@ export function QueryEditor({ query, isNew, items }: { query: SavedQueryView; is
               <ExportMenu ids={rows.map((r) => r.id)} columns={columns.map((c) => c.key)} name={name || undefined} />
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto border-t border-line">
+          <div ref={setTableScrollEl} className="min-h-0 flex-1 overflow-auto border-t border-line">
             <ItemTable
+            scrollElement={tableScrollEl}
               rows={rows}
               allItems={items}
               columns={columns}

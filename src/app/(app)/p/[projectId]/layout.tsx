@@ -26,7 +26,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <ProjectNav projectName={meta.name} projectKey={meta.key} links={links} />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">{children}</div>
     </div>
   );
 }

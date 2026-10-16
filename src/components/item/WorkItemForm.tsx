@@ -404,6 +404,11 @@ export function WorkItemForm(props: WorkItemFormProps) {
             )}
           </div>
         </div>
+        {props.variant === "page" && (
+          <h1 className="sr-only">
+            {isNew ? t("item.new") : `${type?.name ?? ""} ${itemId}: ${draft.title}`}
+          </h1>
+        )}
         <label htmlFor={`${idp}-title`} className="sr-only">
           {t("field.title")}
         </label>

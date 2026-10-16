@@ -4,7 +4,8 @@ import { login, TESTER, unique } from "./helpers";
 test("API token: create in UI, use REST API, revoke", async ({ page, request }) => {
   await login(page, TESTER);
   await page.goto("/account/tokens");
-  await page.getByLabel("Token name").fill(unique("e2e"));
+  const tokenName = unique("e2e");
+  await page.getByLabel("Token name").fill(tokenName);
   await page.getByRole("button", { name: "Create token" }).click();
   const token = (await page.getByTestId("new-token").textContent())!.trim();
   expect(token).toMatch(/^tb_/);
@@ -52,8 +53,9 @@ test("API token: create in UI, use REST API, revoke", async ({ page, request }) 
 
   // Revoke
   page.once("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: "Revoke" }).first().click();
-  await expect(page.getByText("Revoked").first()).toBeVisible();
+  const row = page.locator("tr", { hasText: tokenName });
+  await row.getByRole("button", { name: "Revoke" }).click();
+  await expect(row.getByText("Revoked")).toBeVisible();
   expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
 });
 

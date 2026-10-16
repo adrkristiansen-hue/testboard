@@ -49,6 +49,7 @@ export function ItemList({
   const [columnKeys, setColumnKeys] = useState<string[]>(initialColumns ?? DEFAULT_COLUMNS);
   const [mode, setMode] = useState<"flat" | "tree">(initialMode);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [tableScrollEl, setTableScrollEl] = useState<HTMLDivElement | null>(null);
   const [selection, setSelection] = useState<Set<number>>(() => new Set());
   const [bulkCreateOpen, setBulkCreateOpen] = useState(false);
 
@@ -158,8 +159,9 @@ export function ItemList({
           </div>
         </div>
         {canEdit && selectedRows.length > 0 && <BulkBar selected={selectedRows} onClear={() => setSelection(new Set())} onDone={refresh} />}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={setTableScrollEl} className="min-h-0 flex-1 overflow-auto">
           <ItemTable
+            scrollElement={tableScrollEl}
             rows={rows}
             allItems={items}
             columns={columns}

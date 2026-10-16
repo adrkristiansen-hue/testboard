@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ItemView } from "@/lib/types";
 import type { ColumnDef, InlineEditKind } from "@/lib/columns";
 import type { SortSpec } from "@/lib/query";
@@ -31,7 +32,14 @@ export interface ItemTableProps {
   selection?: ReadonlySet<number>;
   onToggleRow?: (id: number) => void;
   onToggleAll?: () => void;
+  /**
+   * The scrolling container (passed as an element, not a ref, so the table re-renders once it exists);
+   * when given, long tables only render the visible rows.
+   */
+  scrollElement?: HTMLElement | null;
 }
+
+const VIRTUAL_ROWS_FROM = 150;
 
 export function ItemTable(props: ItemTableProps) {
   const { t, locale } = useI18n();
@@ -45,6 +53,22 @@ export function ItemTable(props: ItemTableProps) {
     () => (props.mode === "tree" ? buildTree(props.rows, props.allItems, collapsed) : props.rows.map((item) => ({ item, depth: 0, hasChildren: false, context: false }))),
     [props.mode, props.rows, props.allItems, collapsed],
   );
+  // Decide on the prop being passed (even while the element is still null during SSR/hydration),
+  // so the first HTML only contains the top rows instead of the whole table.
+  const virtual = props.scrollElement !== undefined && treeRows.length >= VIRTUAL_ROWS_FROM;
+  const virtualizer = useVirtualizer({
+    count: virtual ? treeRows.length : 0,
+    getScrollElement: () => props.scrollElement ?? null,
+    estimateSize: () => 44,
+    initialRect: { width: 1200, height: 1000 },
+    overscan: 15,
+    getItemKey: (i) => treeRows[i]?.item.id ?? i,
+  });
+  const vItems = virtual ? virtualizer.getVirtualItems() : [];
+  const visibleRows = virtual ? vItems.map((v) => ({ row: treeRows[v.index], index: v.index })) : treeRows.map((row, index) => ({ row, index }));
+  const padTop = virtual && vItems.length ? vItems[0].start : 0;
+  const padBottom = virtual && vItems.length ? virtualizer.getTotalSize() - vItems[vItems.length - 1].end : 0;
+  const colCount = props.columns.length + (props.selection && canEdit ? 1 : 0);
   const selectable = !!props.selection && canEdit;
   const selectedShown = selectable ? props.rows.filter((r) => props.selection!.has(r.id)).length : 0;
   const allSelected = props.rows.length > 0 && selectedShown === props.rows.length;
@@ -87,11 +111,18 @@ export function ItemTable(props: ItemTableProps) {
         </tr>
       </thead>
       <tbody>
-        {treeRows.map(({ item: it, depth, hasChildren, context }) => {
+        {padTop > 0 && (
+          <tr aria-hidden="true">
+            <td colSpan={colCount} style={{ height: padTop, padding: 0 }} />
+          </tr>
+        )}
+        {visibleRows.map(({ row: { item: it, depth, hasChildren, context }, index }) => {
           const selected = props.selection?.has(it.id) ?? false;
           return (
             <tr
               key={it.id}
+              data-index={index}
+              ref={virtual ? virtualizer.measureElement : undefined}
               className={`border-b border-line hover:bg-brand-soft/40 ${props.openId === it.id || selected ? "bg-brand-soft" : "bg-white"} ${context ? "text-ink-muted" : ""}`}
             >
               {selectable && (
@@ -157,6 +188,11 @@ export function ItemTable(props: ItemTableProps) {
             </tr>
           );
         })}
+        {padBottom > 0 && (
+          <tr aria-hidden="true">
+            <td colSpan={colCount} style={{ height: padBottom, padding: 0 }} />
+          </tr>
+        )}
       </tbody>
     </table>
   );
