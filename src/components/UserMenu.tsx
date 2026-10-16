@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { logout } from "@/server/actions/auth";
 import { setEmailNotifications } from "@/server/actions/notifications";
@@ -33,6 +34,9 @@ export function UserMenu({ user, emailNotifications, emailServerEnabled }: { use
             </label>
             {!emailServerEnabled && <p className="mt-1 text-xs text-ink-muted">{t("notif.emailServerOff")}</p>}
           </div>
+          <Link href="/account/tokens" className="block border-t border-line px-2 py-1.5 text-sm hover:bg-brand-soft">
+            {t("nav.apiTokens")}
+          </Link>
           <form action={logout} className="border-t border-line pt-1">
             <button type="submit" className="w-full rounded px-2 py-1.5 text-left hover:bg-brand-soft">
               {t("nav.signOut")}

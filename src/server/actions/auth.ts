@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "../db";
-import { clearSessionCookie, setSessionCookie } from "../session";
+import { clearSessionCookie, readSessionUserId, setSessionCookie } from "../session";
 import { isLocale, LOCALE_COOKIE } from "@/lib/i18n";
 import { audit } from "../audit";
 
@@ -17,13 +17,19 @@ export async function login(_prev: { error?: string } | undefined, formData: For
   const user = email ? await db.user.findUnique({ where: { email } }) : null;
   // Compare even when the user is missing to keep timing similar.
   const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
-  if (!user || !ok || !user.active) return { error: "login.failed" };
+  if (!user || !ok || !user.active) {
+    // Record failed attempts for known accounts (not for unknown e-mails, to keep the log free of typos).
+    if (user) await audit(null, "auth.loginFailed", "User", user.id);
+    return { error: "login.failed" };
+  }
   await setSessionCookie(user.id);
   await audit(user.id, "auth.login", "User", user.id);
   redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
 }
 
 export async function logout() {
+  const userId = await readSessionUserId();
+  if (userId) await audit(userId, "auth.logout", "User", userId);
   await clearSessionCookie();
   redirect("/login");
 }

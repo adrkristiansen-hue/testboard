@@ -5,6 +5,7 @@ import { db } from "../db";
 import { getCurrentUser, ForbiddenError } from "../auth";
 import { run, type ActionResult } from "../result";
 import { UserError } from "../workitems";
+import { audit } from "../audit";
 import { OPS, type Clause } from "@/lib/query";
 import { canConfigure } from "@/lib/types";
 
@@ -44,11 +45,13 @@ export async function saveQuery(input: z.infer<typeof saveSchema>): Promise<Acti
       if (!existing || existing.projectId !== q.projectId) throw new UserError("Query not found.", "NOT_FOUND");
       if (existing.ownerId !== user.id && !(existing.shared && lead)) throw new ForbiddenError("You cannot change this query.");
       await db.savedQuery.update({ where: { id: q.id }, data });
+      if (q.shared || existing.shared) await audit(user.id, "query.update", "SavedQuery", q.id, { name: q.name, shared: q.shared });
       return { id: q.id };
     }
     const project = await db.project.findUnique({ where: { id: q.projectId }, select: { id: true } });
     if (!project) throw new UserError("Unknown project.");
     const created = await db.savedQuery.create({ data: { ...data, projectId: q.projectId, ownerId: user.id } });
+    if (q.shared) await audit(user.id, "query.create", "SavedQuery", created.id, { name: q.name, shared: true });
     return { id: created.id };
   });
 }
@@ -60,6 +63,7 @@ export async function deleteQuery(id: string): Promise<ActionResult> {
     if (!existing) throw new UserError("Query not found.", "NOT_FOUND");
     if (existing.ownerId !== user.id && !(existing.shared && canConfigure(user.role))) throw new ForbiddenError("You cannot delete this query.");
     await db.savedQuery.delete({ where: { id } });
+    if (existing.shared) await audit(user.id, "query.delete", "SavedQuery", id, { name: existing.name });
     return undefined;
   });
 }

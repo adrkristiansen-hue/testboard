@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useT } from "../I18nProvider";
 import type { MessageKey } from "@/lib/i18n";
 
-const LINKS: { key: string; href: string; label: MessageKey }[] = [{ key: "users", href: "/admin/users", label: "nav.users" }];
+const LINKS: { key: string; href: string; label: MessageKey }[] = [
+  { key: "users", href: "/admin/users", label: "nav.users" },
+  { key: "audit", href: "/admin/audit", label: "nav.audit" },
+  { key: "tokens", href: "/admin/tokens", label: "nav.apiTokens" },
+  { key: "templates", href: "/admin/templates", label: "nav.templates" },
+];
 
 export function AdminNav({ current }: { current: string }) {
   const t = useT();

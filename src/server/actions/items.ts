@@ -9,6 +9,7 @@ import { loadItemDetail } from "../items-detail";
 import { loadProjectMeta } from "../projects";
 import { notifyComment, notifyBulkAssigned, follow } from "../notify";
 import { getStorage } from "../storage";
+import { audit } from "../audit";
 import { parseStateMap, resolveMove, orderBetween } from "@/lib/board";
 import { docToText, isDocEmpty, sanitizeDoc, collectImageSrcs, type RtDoc } from "@/lib/richtext";
 import { extractMentions } from "@/lib/mentions";
@@ -157,17 +158,20 @@ export async function bulkCreateTestTasks(input: z.infer<typeof bulkCreateSchema
       existing.add(bulkRowKey(r));
     }
     if (spec.assignedToId && ids.length) await notifyBulkAssigned(user, new Map([[spec.assignedToId, ids]]));
+    await audit(user.id, "workitem.bulkCreate", "Project", meta.id, { created: ids.length, skipped });
     return { created: ids.length, skipped, ids };
   });
 }
 
 export async function deleteItem(id: number): Promise<ActionResult> {
   return run(async () => {
-    await requireConfigurer();
+    const user = await requireConfigurer();
     const atts = await db.attachment.findMany({ where: { workItemId: id } });
+    const item = await db.workItem.findUnique({ where: { id }, select: { title: true, projectId: true } });
     await db.workItem.updateMany({ where: { parentId: id }, data: { parentId: null } });
     await db.workItem.delete({ where: { id } });
     for (const a of atts) await getStorage().delete(a.storageKey).catch(() => undefined);
+    await audit(user.id, "workitem.delete", "WorkItem", String(id), item);
     return undefined;
   });
 }
