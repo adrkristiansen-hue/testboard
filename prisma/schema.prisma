@@ -1,0 +1,439 @@
+// Test-tracking board data model. Concepts mirror Azure Boards (see docs/glossary.md).
+// SQLite for local use; all types are portable to PostgreSQL by switching the provider.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------------------------------------------------------------------------
+// Users & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  /// ADMIN | TEST_LEAD | MEMBER | READ_ONLY
+  role         String   @default("MEMBER")
+  /// Avatar background colour (hex)
+  color        String   @default("#2563eb")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  teams            TeamMember[]
+  assignedItems    WorkItem[]     @relation("AssignedTo")
+  createdItems     WorkItem[]     @relation("CreatedBy")
+  changedItems     WorkItem[]     @relation("ChangedBy")
+  comments         Comment[]
+  reactions        CommentReaction[]
+  mentions         Mention[]
+  history          HistoryEntry[]
+  attachments      Attachment[]
+  follows          Follow[]
+  notifications    Notification[] @relation("NotificationRecipient")
+  actorNotifs      Notification[] @relation("NotificationActor")
+  links            WorkItemLink[]
+  savedQueries     SavedQuery[]
+  apiTokens        ApiToken[]
+  auditEntries     AuditLog[]
+}
+
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  /// SHA-256 hash of the token; the plain token is shown once on creation
+  tokenHash  String    @unique
+  prefix     String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  details    String?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Project structure: Project, Module (Area Path), Phase (Iteration Path), Team
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  modules      Module[]
+  phases       Phase[]
+  teams        Team[]
+  types        WorkItemType[]
+  workItems    WorkItem[]
+  savedQueries SavedQuery[]
+}
+
+model Module {
+  id        String  @id @default(cuid())
+  projectId String
+  parentId  String?
+  name      String
+  order     Int     @default(0)
+
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent    Module?      @relation("ModuleTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Module[]     @relation("ModuleTree")
+  workItems WorkItem[]
+  teams     TeamModule[]
+
+  @@index([projectId])
+}
+
+model Phase {
+  id        String    @id @default(cuid())
+  projectId String
+  name      String
+  startDate DateTime?
+  endDate   DateTime?
+  order     Int       @default(0)
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workItems WorkItem[]
+
+  @@index([projectId])
+}
+
+model Team {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  /// SwimlaneConfig JSON (see src/lib/swimlanes.ts)
+  swimlanes String @default("{\"mode\":\"none\"}")
+  /// CardConfig JSON (see src/lib/cards.ts)
+  cardConfig String @default("{}")
+
+  project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members  TeamMember[]
+  modules  TeamModule[]
+  columns  BoardColumn[]
+  mentions Mention[]
+
+  @@index([projectId])
+}
+
+model TeamMember {
+  teamId String
+  userId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+}
+
+/// A team subscribes to modules; includeChildren mirrors Azure's "include sub areas".
+model TeamModule {
+  teamId          String
+  moduleId        String
+  includeChildren Boolean @default(true)
+  team            Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  module          Module  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, moduleId])
+}
+
+// ---------------------------------------------------------------------------
+// Process: work item types and their workflow states
+// ---------------------------------------------------------------------------
+
+model WorkItemType {
+  id        String  @id @default(cuid())
+  projectId String
+  /// Stable key used in code and templates, e.g. TEST_TASK, DEFECT
+  key       String
+  name      String
+  /// Short icon glyph shown on cards
+  icon      String  @default("■")
+  color     String  @default("#64748b")
+  /// Custom field definitions JSON: FieldDef[] (see src/lib/fields.ts)
+  fields    String  @default("[]")
+  /// Optional allowed transitions JSON: { [fromState]: string[] }. Empty = any transition allowed.
+  transitions String @default("{}")
+  order     Int     @default(0)
+  disabled  Boolean @default(false)
+
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  states    WorkflowState[]
+  workItems WorkItem[]
+
+  @@unique([projectId, key])
+}
+
+model WorkflowState {
+  id       String @id @default(cuid())
+  typeId   String
+  name     String
+  /// PROPOSED | IN_PROGRESS | RESOLVED | COMPLETED | REMOVED
+  category String
+  color    String @default("#94a3b8")
+  order    Int    @default(0)
+
+  type WorkItemType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+
+  @@unique([typeId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Board configuration (per team)
+// ---------------------------------------------------------------------------
+
+model BoardColumn {
+  id       String  @id @default(cuid())
+  teamId   String
+  name     String
+  order    Int     @default(0)
+  wipLimit Int?
+  /// Split into Doing / Done sub-columns
+  split    Boolean @default(false)
+  /// JSON map of work item type id -> state name, e.g. {"typeId":"Active"}
+  stateMap String  @default("{}")
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+}
+
+// ---------------------------------------------------------------------------
+// Work items
+// ---------------------------------------------------------------------------
+
+model WorkItem {
+  id              Int       @id @default(autoincrement())
+  projectId       String
+  typeId          String
+  title           String
+  /// Rich text stored as Tiptap JSON
+  description     String?
+  /// Plain-text projection of description for search/export
+  descriptionText String?
+  state           String
+  /// Doing/Done flag for split board columns
+  columnDone      Boolean   @default(false)
+  assignedToId    String?
+  moduleId        String?
+  phaseId         String?
+  parentId        Int?
+  /// 1 (highest) to 4
+  priority        Int       @default(2)
+  /// 1 (critical) to 4 (low); used by defects
+  severity        Int?
+  /// JSON string[]
+  tags            String    @default("[]")
+  dueDate         DateTime?
+  /// Type-specific custom field values JSON: { [fieldKey]: value }
+  fields          String    @default("{}")
+  /// Fractional rank for ordering within a board column
+  boardOrder      Float     @default(0)
+  stateChangedAt  DateTime  @default(now())
+  createdById     String
+  createdAt       DateTime  @default(now())
+  changedById     String
+  changedAt       DateTime  @default(now())
+
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type       WorkItemType @relation(fields: [typeId], references: [id])
+  assignedTo User?        @relation("AssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  module     Module?      @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  phase      Phase?       @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  parent     WorkItem?    @relation("ParentChild", fields: [parentId], references: [id], onDelete: SetNull)
+  children   WorkItem[]   @relation("ParentChild")
+  createdBy  User         @relation("CreatedBy", fields: [createdById], references: [id])
+  changedBy  User         @relation("ChangedBy", fields: [changedById], references: [id])
+
+  comments     Comment[]
+  attachments  Attachment[]
+  history      HistoryEntry[]
+  linksFrom    WorkItemLink[] @relation("LinkSource")
+  linksTo      WorkItemLink[] @relation("LinkTarget")
+  follows      Follow[]
+  notifications Notification[]
+
+  @@index([projectId, state])
+  @@index([assignedToId])
+  @@index([parentId])
+}
+
+/// Non-hierarchical links. Parent/child is WorkItem.parentId.
+model WorkItemLink {
+  id          String   @id @default(cuid())
+  /// RELATED | BLOCKS | DUPLICATE_OF   (source BLOCKS target; source DUPLICATE_OF target)
+  type        String
+  sourceId    Int
+  targetId    Int
+  createdById String
+  createdAt   DateTime @default(now())
+
+  source    WorkItem @relation("LinkSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  target    WorkItem @relation("LinkTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@unique([type, sourceId, targetId])
+}
+
+model Comment {
+  id         String    @id @default(cuid())
+  workItemId Int
+  authorId   String
+  /// Tiptap JSON
+  body       String
+  bodyText   String    @default("")
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
+
+  workItem    WorkItem          @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  author      User              @relation(fields: [authorId], references: [id])
+  reactions   CommentReaction[]
+  mentions    Mention[]
+  attachments Attachment[]
+
+  @@index([workItemId])
+}
+
+model CommentReaction {
+  commentId String
+  userId    String
+  emoji     String
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId, emoji])
+}
+
+/// A user or team mentioned in a comment (or description)
+model Mention {
+  id        String   @id @default(cuid())
+  commentId String
+  userId    String?
+  teamId    String?
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team    Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  workItemId   Int
+  commentId    String?
+  fileName     String
+  mimeType     String
+  size         Int
+  /// Key in the storage backend (see src/server/storage.ts)
+  storageKey   String
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  comment    Comment? @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  uploadedBy User     @relation(fields: [uploadedById], references: [id])
+}
+
+/// Field-level change log. One row per changed field; `rev` groups a single save.
+model HistoryEntry {
+  id          String   @id @default(cuid())
+  workItemId  Int
+  rev         Int
+  field       String
+  oldValue    String?
+  newValue    String?
+  changedById String
+  changedAt   DateTime @default(now())
+
+  workItem  WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  changedBy User     @relation(fields: [changedById], references: [id])
+
+  @@index([workItemId, rev])
+  @@index([field, changedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration
+// ---------------------------------------------------------------------------
+
+model Follow {
+  userId     String
+  workItemId Int
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workItemId])
+}
+
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  /// ASSIGNED | MENTIONED | STATE_CHANGED | COMMENTED
+  type       String
+  workItemId Int?
+  actorId    String?
+  message    String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user     User      @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor    User?     @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Queries & templates
+// ---------------------------------------------------------------------------
+
+model SavedQuery {
+  id        String   @id @default(cuid())
+  projectId String
+  ownerId   String
+  name      String
+  /// FLAT | TREE
+  mode      String   @default("FLAT")
+  /// QueryDefinition JSON (see src/lib/query.ts)
+  definition String
+  /// Column keys JSON string[]
+  columns   String   @default("[]")
+  shared    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner   User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+}
+
+model ProcessTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  /// Serialized modules, phases, types, workflows, teams/columns/swimlanes
+  content     String
+  createdAt   DateTime @default(now())
+}
