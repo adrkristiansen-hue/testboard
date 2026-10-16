@@ -16,7 +16,12 @@ export default async function ProjectLayout({ children, params }: { children: Re
     { href: `/p/${projectId}/items`, label: t("nav.items"), icon: "☰" },
     { href: `/p/${projectId}/queries`, label: t("nav.queries"), icon: "⌕" },
     { href: `/p/${projectId}/dashboard`, label: t("nav.dashboard"), icon: "▥" },
-    ...(canConfigure(user.role) ? [{ href: `/p/${projectId}/settings`, label: t("nav.settings"), icon: "⚙" }] : []),
+    ...(canConfigure(user.role)
+      ? [
+          { href: `/p/${projectId}/import`, label: t("nav.import"), icon: "⇪" },
+          { href: `/p/${projectId}/settings`, label: t("nav.settings"), icon: "⚙" },
+        ]
+      : []),
   ];
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
