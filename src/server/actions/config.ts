@@ -13,6 +13,7 @@ import { STATE_CATEGORIES, validateWorkflow, type StateCategory } from "@/lib/wo
 import { validateColumns } from "@/lib/board";
 import { ROLES } from "@/lib/types";
 import { loadProjectMeta } from "../projects";
+import { createProjectFromTemplate, parseTemplateContent, templateFromProject } from "../template-build";
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -25,11 +26,19 @@ const projectSchema = z.object({
 });
 
 /** Create a project with the default process (types, workflows) and one team board. */
-export async function createProject(input: z.infer<typeof projectSchema>): Promise<ActionResult<{ id: string }>> {
+export async function createProject(input: z.infer<typeof projectSchema> & { templateId?: string }): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
     const user = await requireConfigurer();
-    const data = projectSchema.parse(input);
+    const { templateId, ...rest } = input;
+    const data = projectSchema.parse(rest);
     if (await db.project.findUnique({ where: { key: data.key } })) throw new UserError("That key is already in use.");
+    if (templateId) {
+      const tpl = await db.processTemplate.findUnique({ where: { id: templateId } });
+      if (!tpl) throw new UserError("Template not found.");
+      const id = await createProjectFromTemplate(db, data, parseTemplateContent(tpl.content), user.id);
+      await audit(user.id, "project.create", "Project", id, { ...data, template: tpl.name });
+      return { id };
+    }
     const project = await db.project.create({ data });
     const typeIds = new Map<string, string>();
     for (const [i, t] of DEFAULT_TYPES.entries()) {
@@ -438,6 +447,32 @@ export async function saveUser(input: z.infer<typeof userSchema>): Promise<Actio
       await db.user.create({ data: { ...base, passwordHash: bcrypt.hashSync(u.password, 10) } });
     }
     await audit(admin.id, u.id ? "user.update" : "user.create", "User", u.id, { ...base, passwordChanged: !!u.password });
+    return undefined;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Process templates
+// ---------------------------------------------------------------------------
+
+export async function saveProjectAsTemplate(projectId: string, input: { name: string; description?: string }): Promise<ActionResult<{ id: string }>> {
+  return run(async () => {
+    const user = await requireConfigurer();
+    const d = z.object({ name: z.string().trim().min(1).max(100), description: z.string().max(1000).optional() }).parse(input);
+    const content = await templateFromProject(db, projectId);
+    const row = await db.processTemplate.create({ data: { name: d.name, description: d.description || null, content: JSON.stringify(content) } });
+    await audit(user.id, "template.create", "ProcessTemplate", row.id, { name: d.name, fromProject: projectId });
+    return { id: row.id };
+  });
+}
+
+export async function deleteTemplate(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const user = await requireAdmin();
+    const row = await db.processTemplate.findUnique({ where: { id } });
+    if (!row) throw new UserError("Template not found.");
+    await db.processTemplate.delete({ where: { id } });
+    await audit(user.id, "template.delete", "ProcessTemplate", id, { name: row.name });
     return undefined;
   });
 }

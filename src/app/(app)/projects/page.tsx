@@ -4,12 +4,20 @@ import { requireUser } from "@/server/auth";
 import { getT } from "@/server/locale";
 import { canConfigure } from "@/lib/types";
 import { NewProjectForm } from "@/components/settings/NewProjectForm";
+import { parseTemplateContent, summarizeTemplate } from "@/server/template-build";
 
 export const metadata = { title: "Projects" };
 
 export default async function ProjectsPage() {
   const user = await requireUser();
   const { t } = await getT();
+  const templates = (await db.processTemplate.findMany({ orderBy: { name: "asc" } })).flatMap((x) => {
+    try {
+      return [{ id: x.id, name: x.name, description: x.description, summary: summarizeTemplate(parseTemplateContent(x.content)) }];
+    } catch {
+      return [];
+    }
+  });
   const projects = await db.project.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { workItems: true, teams: true } } } });
   return (
     <main className="mx-auto w-full max-w-4xl p-4">
@@ -31,7 +39,7 @@ export default async function ProjectsPage() {
       {canConfigure(user.role) && (
         <section className="mt-6">
           <h2 className="mb-2 text-sm font-semibold">{t("settings.newProject")}</h2>
-          <NewProjectForm />
+          <NewProjectForm templates={templates} />
         </section>
       )}
     </main>

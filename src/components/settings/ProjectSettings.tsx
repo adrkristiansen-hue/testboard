@@ -9,7 +9,7 @@ import type { TypeLite } from "@/lib/types";
 import { STATE_CATEGORIES, CATEGORY_COLORS, type StateCategory } from "@/lib/workflow";
 import { toDateInput } from "@/lib/format";
 import type { ActionResult } from "@/server/result";
-import { deleteModule, deletePhase, deleteTeam, moveModule, saveModule, savePhase, saveTeam, saveType, updateProject } from "@/server/actions/config";
+import { deleteModule, deletePhase, deleteTeam, moveModule, saveModule, savePhase, saveProjectAsTemplate, saveTeam, saveType, updateProject } from "@/server/actions/config";
 import { useProject } from "../ProjectProvider";
 import { useT } from "../I18nProvider";
 import { useToast } from "../ui/Toast";
@@ -73,6 +73,61 @@ export function ProjectSettings({ description, teams, typeUsage }: { description
 }
 
 function General({ description }: { description: string }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <GeneralForm description={description} />
+      <SaveAsTemplate />
+    </div>
+  );
+}
+
+function SaveAsTemplate() {
+  const t = useT();
+  const { meta } = useProject();
+  const { pending, exec } = useAction();
+  const [name, setName] = useState(`${meta.name} – process`);
+  const [desc, setDesc] = useState("");
+  const [saved, setSaved] = useState(false);
+  return (
+    <form
+      className="card-panel flex max-w-xl flex-col gap-3 p-4"
+      aria-labelledby="tpl-h"
+      onSubmit={(e) => {
+        e.preventDefault();
+        exec(() => saveProjectAsTemplate(meta.id, { name, description: desc }), () => setSaved(true));
+      }}
+    >
+      <h2 id="tpl-h" className="font-semibold">
+        {t("settings.saveAsTemplate")}
+      </h2>
+      <p className="text-sm text-ink-muted">{t("template.saveHint")}</p>
+      <div>
+        <label className="label" htmlFor="tpl-name">
+          {t("template.name")}
+        </label>
+        <input id="tpl-name" className="input" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div>
+        <label className="label" htmlFor="tpl-desc">
+          {t("field.description")}
+        </label>
+        <textarea id="tpl-desc" className="input min-h-16" value={desc} maxLength={1000} onChange={(e) => setDesc(e.target.value)} />
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn btn-secondary" disabled={pending || !name.trim()}>
+          {t("settings.saveAsTemplate")}
+        </button>
+        {saved && (
+          <span role="status" className="text-sm text-[#006300]">
+            ✓ {t("template.saved")}
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function GeneralForm({ description }: { description: string }) {
   const t = useT();
   const { meta } = useProject();
   const { pending, exec } = useAction();

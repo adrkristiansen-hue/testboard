@@ -9,6 +9,7 @@ import { DEFAULT_CARD_CONFIG } from "../src/lib/cards";
 import { extractMentions, plainTextToMentionDoc } from "../src/lib/mentions";
 import { docToText, textToDoc } from "../src/lib/richtext";
 import type { SwimlaneConfig } from "../src/lib/swimlanes";
+import { templateFromProject } from "../src/server/template-build";
 
 const db = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: process.env.DATABASE_URL ?? "file:./dev.db" }) });
 
@@ -28,6 +29,7 @@ const daysFromNow = (d: number) => {
 
 async function reset() {
   // Order matters for SQLite foreign keys.
+  await db.processTemplate.deleteMany();
   await db.notification.deleteMany();
   await db.follow.deleteMany();
   await db.mention.deleteMany();
@@ -403,6 +405,15 @@ async function main() {
       shared: true,
       definition: JSON.stringify({ root: { logic: "and", clauses: [{ field: "type", op: "eq", value: "TEST_TASK" }, { field: "childCount", op: "gt", value: 0 }] } }),
       columns: JSON.stringify(["id", "type", "title", "state", "assignedTo", "module"]),
+    },
+  });
+
+  // A reusable process template built from the demo project (no work items, only the process).
+  await db.processTemplate.create({
+    data: {
+      name: "SuccessFactors SIT/UAT",
+      description: "Modules for Employee Central, Recruiting, Onboarding, Care, Reporting and ECP; SIT 1, SIT 2 and UAT; three team boards.",
+      content: JSON.stringify(await templateFromProject(db, project.id)),
     },
   });
 

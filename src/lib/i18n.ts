@@ -462,6 +462,16 @@ const en = {
   "tokens.confirmRevoke": "Revoke the token \"{name}\"? Scripts using it will stop working.",
   "tokens.empty": "No tokens.",
   "tokens.allTitle": "All API tokens",
+  "template.saveHint": "Saves modules, phases, work item types with workflows and fields, and boards with columns, swimlanes and cards. Work items are not included.",
+  "template.name": "Template name",
+  "template.saved": "Template saved",
+  "template.startFrom": "Process",
+  "template.standard": "Standard (built-in)",
+  "template.standardHint": "Standard work item types and one board. Add modules and phases afterwards.",
+  "template.summary": "{modules} modules, {phases} phases, {types} types, {boards} boards",
+  "template.adminHint": "Templates are created from Project settings → General. New projects can start from a template.",
+  "template.invalid": "Unreadable template",
+  "template.empty": "No templates yet.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -923,6 +933,16 @@ const nb: Partial<Dictionary> = {
   "tokens.confirmRevoke": "Trekke tilbake nøkkelen \"{name}\"? Skript som bruker den slutter å virke.",
   "tokens.empty": "Ingen nøkler.",
   "tokens.allTitle": "Alle API-nøkler",
+  "template.saveHint": "Lagrer moduler, faser, arbeidselementtyper med arbeidsflyt og felt, og boards med kolonner, svømmebaner og kort. Arbeidselementer tas ikke med.",
+  "template.name": "Navn på mal",
+  "template.saved": "Mal lagret",
+  "template.startFrom": "Prosess",
+  "template.standard": "Standard (innebygd)",
+  "template.standardHint": "Standard arbeidselementtyper og ett board. Legg til moduler og faser etterpå.",
+  "template.summary": "{modules} moduler, {phases} faser, {types} typer, {boards} boards",
+  "template.adminHint": "Maler lages fra Prosjektinnstillinger → Generelt. Nye prosjekter kan starte fra en mal.",
+  "template.invalid": "Uleselig mal",
+  "template.empty": "Ingen maler ennå.",
 };
 
 export function getDictionary(locale: Locale): Dictionary {
