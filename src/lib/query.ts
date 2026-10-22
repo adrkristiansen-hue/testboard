@@ -49,6 +49,8 @@ export interface QueryContext {
   types: Map<string, TypeLite>;
   /** moduleId -> set of itself + all descendant ids */
   moduleSubtree?: Map<string, Set<string>>;
+  /** userId -> organisation name, for "reported by / assignee organisation" */
+  userOrg?: Map<string, string | null>;
 }
 
 export type FieldType = "number" | "string" | "date" | "boolean" | "user" | "module" | "phase" | "type" | "state" | "category" | "tags";
@@ -78,6 +80,8 @@ export const QUERY_FIELDS: Record<string, FieldType> = {
   parentId: "number",
   overdue: "boolean",
   ageDays: "number",
+  createdByOrg: "string",
+  assignedOrg: "string",
 };
 
 export function isGroup(c: Clause): c is Group {
@@ -154,6 +158,10 @@ export function fieldValue(item: ItemView, field: string, ctx: QueryContext): un
       return item.parentId;
     case "overdue":
       return isOverdue(item, ctx);
+    case "createdByOrg":
+      return ctx.userOrg?.get(item.createdById) ?? null;
+    case "assignedOrg":
+      return item.assignedToId ? (ctx.userOrg?.get(item.assignedToId) ?? null) : null;
     case "ageDays": {
       const now = (ctx.now ?? new Date()).getTime();
       return Math.floor((now - new Date(item.createdAt).getTime()) / DAY);

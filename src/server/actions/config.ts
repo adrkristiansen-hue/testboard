@@ -481,6 +481,7 @@ const userSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   active: z.boolean(),
   password: z.string().min(8).max(200).optional().or(z.literal("")),
+  organizationId: z.string().nullable().optional(),
 });
 
 export async function saveUser(input: z.infer<typeof userSchema>): Promise<ActionResult> {
@@ -490,7 +491,7 @@ export async function saveUser(input: z.infer<typeof userSchema>): Promise<Actio
     const clash = await db.user.findUnique({ where: { email: u.email } });
     if (clash && clash.id !== u.id) throw new UserError("Email already in use.");
     if (u.id === admin.id && (u.role !== "ADMIN" || !u.active)) throw new UserError("You cannot remove your own admin access.");
-    const base = { name: u.name, email: u.email, role: u.role, color: u.color, active: u.active };
+    const base = { name: u.name, email: u.email, role: u.role, color: u.color, active: u.active, organizationId: u.organizationId ?? null };
     if (u.id) {
       await db.user.update({ where: { id: u.id }, data: { ...base, ...(u.password ? { passwordHash: bcrypt.hashSync(u.password, 10) } : {}) } });
     } else {
@@ -524,6 +525,36 @@ export async function deleteTemplate(id: string): Promise<ActionResult> {
     if (!row) throw new UserError("Template not found.");
     await db.processTemplate.delete({ where: { id } });
     await audit(user.id, "template.delete", "ProcessTemplate", id, { name: row.name });
+    return undefined;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Organisations
+// ---------------------------------------------------------------------------
+
+const orgSchema = z.object({ id: z.string().optional(), name: z.string().trim().min(1).max(120), internal: z.boolean() });
+
+export async function saveOrganization(input: z.infer<typeof orgSchema>): Promise<ActionResult<{ id: string }>> {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const o = orgSchema.parse(input);
+    const clash = await db.organization.findUnique({ where: { name: o.name } });
+    if (clash && clash.id !== o.id) throw new UserError("An organisation with that name already exists.");
+    const row = o.id ? await db.organization.update({ where: { id: o.id }, data: { name: o.name, internal: o.internal } }) : await db.organization.create({ data: { name: o.name, internal: o.internal } });
+    await audit(admin.id, o.id ? "organization.update" : "organization.create", "Organization", row.id, o);
+    return { id: row.id };
+  });
+}
+
+export async function deleteOrganization(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const admin = await requireAdmin();
+    const org = await db.organization.findUnique({ where: { id }, include: { _count: { select: { users: true } } } });
+    if (!org) throw new UserError("Organisation not found.");
+    if (org._count.users > 0) throw new UserError("Move the people in this organisation first.");
+    await db.organization.delete({ where: { id } });
+    await audit(admin.id, "organization.delete", "Organization", id, { name: org.name });
     return undefined;
   });
 }

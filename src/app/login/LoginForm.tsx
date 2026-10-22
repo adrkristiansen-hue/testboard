@@ -6,7 +6,7 @@ import { useT } from "@/components/I18nProvider";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import type { MessageKey } from "@/lib/i18n";
 
-export function LoginForm({ next }: { next: string }) {
+export function LoginForm({ next, microsoft, ssoError }: { next: string; microsoft: boolean; ssoError?: string }) {
   const t = useT();
   const [state, action, pending] = useActionState(login, undefined);
   return (
@@ -17,6 +17,29 @@ export function LoginForm({ next }: { next: string }) {
       </div>
       <form action={action} className="card-panel space-y-4 p-6">
         <h1 className="text-lg font-semibold">{t("login.title")}</h1>
+        {ssoError && (
+          <p role="alert" className="rounded bg-red-50 p-2 text-sm text-danger">
+            {t(`login.${ssoError}` as MessageKey)}
+          </p>
+        )}
+        {microsoft && (
+          <>
+            <a href={`/auth/microsoft/start?next=${encodeURIComponent(next)}`} className="btn btn-secondary w-full justify-center gap-2">
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 21 21">
+                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+              </svg>
+              {t("login.microsoft")}
+            </a>
+            <div className="flex items-center gap-2 text-xs text-ink-muted">
+              <span className="h-px flex-1 bg-line" />
+              {t("login.orPassword")}
+              <span className="h-px flex-1 bg-line" />
+            </div>
+          </>
+        )}
         <input type="hidden" name="next" value={next} />
         <div>
           <label htmlFor="email" className="label">

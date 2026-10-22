@@ -252,6 +252,10 @@ function CellContent({ col, item, overdue, onOpen }: { col: ColumnDef; item: Ite
       return item.phaseId ? phaseById.get(item.phaseId)?.name : "";
     case "createdBy":
       return userById.get(item.createdById)?.name ?? "";
+    case "createdByOrg":
+      return userById.get(item.createdById)?.organization ?? "";
+    case "assignedOrg":
+      return item.assignedToId ? (userById.get(item.assignedToId)?.organization ?? "") : "";
     case "parent":
       return item.parentId ? (
         <button type="button" className="hover:underline" onClick={() => onOpen(item.parentId!)}>
@@ -281,7 +285,7 @@ function CellContent({ col, item, overdue, onOpen }: { col: ColumnDef; item: Ite
 }
 
 // Columns rendered through the default branch never need name lookups.
-const NO_NAMES = { typeName: () => "", userName: () => "", modulePath: () => "", phaseName: () => "", category: () => "" };
+const NO_NAMES = { typeName: () => "", userName: () => "", modulePath: () => "", phaseName: () => "", category: () => "", userOrg: () => "" };
 
 function InlineEditor({ item, kind, onDone }: { item: ItemView; kind: InlineEditKind; onDone: (changed: boolean) => void }) {
   const { t } = useI18n();

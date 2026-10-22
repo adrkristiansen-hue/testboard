@@ -11,6 +11,8 @@ export interface UserLite {
   email: string;
   color: string;
   role: Role;
+  /** Organisation name (e.g. the consultancy or a customer) */
+  organization?: string | null;
 }
 
 export interface TeamLite {

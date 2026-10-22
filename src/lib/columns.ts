@@ -28,11 +28,13 @@ export interface ColumnNames {
   modulePath: (id: string | null) => string;
   phaseName: (id: string | null) => string;
   category: (item: ItemView) => string;
+  userOrg: (id: string | null) => string;
 }
 
 export function columnNames(meta: Pick<ProjectMeta, "types" | "users" | "modules" | "phases">): ColumnNames {
   const types = new Map(meta.types.map((t) => [t.id, t]));
   const users = new Map(meta.users.map((u) => [u.id, u.name]));
+  const orgs = new Map(meta.users.map((u) => [u.id, u.organization ?? ""]));
   const modules = new Map(meta.modules.map((m) => [m.id, m.path]));
   const phases = new Map(meta.phases.map((p) => [p.id, p.name]));
   return {
@@ -40,6 +42,7 @@ export function columnNames(meta: Pick<ProjectMeta, "types" | "users" | "modules
     userName: (id) => (id ? (users.get(id) ?? "") : ""),
     modulePath: (id) => (id ? (modules.get(id) ?? "") : ""),
     phaseName: (id) => (id ? (phases.get(id) ?? "") : ""),
+    userOrg: (id) => (id ? (orgs.get(id) ?? "") : ""),
     category: (item) => {
       const t = types.get(item.typeId);
       return (t && categoryOf({ states: t.states }, item.state)) ?? "";
@@ -64,6 +67,8 @@ const BUILT_IN: ColumnDef[] = [
   { key: "children", labelKey: "field.children", sort: "childCount", value: (i) => (i.childTotal ? `${i.childDone}/${i.childTotal}` : "") },
   { key: "comments", labelKey: "field.comments", sort: "commentCount", value: (i) => i.commentCount },
   { key: "createdBy", labelKey: "field.createdBy", sort: "createdBy", value: (i, n) => n.userName(i.createdById) },
+  { key: "createdByOrg", labelKey: "field.createdByOrg", sort: "createdByOrg", value: (i, n) => n.userOrg(i.createdById) },
+  { key: "assignedOrg", labelKey: "field.assignedOrg", sort: "assignedOrg", value: (i, n) => n.userOrg(i.assignedToId) },
   { key: "createdAt", labelKey: "field.createdAt", sort: "createdAt", isDate: true, value: (i) => i.createdAt },
   { key: "changedAt", labelKey: "field.changedAt", sort: "changedAt", isDate: true, value: (i) => i.changedAt },
   { key: "stateChangedAt", labelKey: "field.stateChangedAt", sort: "stateChangedAt", isDate: true, value: (i) => i.stateChangedAt },

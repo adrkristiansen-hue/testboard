@@ -49,13 +49,17 @@ async function reset() {
   await db.workflowState.deleteMany();
   await db.workItemType.deleteMany();
   await db.phase.deleteMany();
+  await db.projectMember.deleteMany();
+  await db.projectRole.deleteMany();
   await db.module.updateMany({ data: { parentId: null } });
   await db.module.deleteMany();
   await db.project.deleteMany();
   await db.apiToken.deleteMany();
   await db.auditLog.deleteMany();
   await db.processTemplate.deleteMany();
+  await db.invite.deleteMany();
   await db.user.deleteMany();
+  await db.organization.deleteMany();
   // Reset the work item id counter so demo IDs start at 1.
   await db.$executeRawUnsafe(`DELETE FROM sqlite_sequence WHERE name = 'WorkItem'`).catch(() => undefined);
 }

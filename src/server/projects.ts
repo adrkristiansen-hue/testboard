@@ -51,7 +51,7 @@ export const loadProjectMeta = cache(async (projectId: string): Promise<ProjectM
   if (!project) return null;
   // People who can be assigned or mentioned: active members of this project only.
   await ensureProjectDefaults(projectId);
-  const users = await db.user.findMany({ where: { active: true, memberships: { some: { projectId } } }, orderBy: { name: "asc" } });
+  const users = await db.user.findMany({ where: { active: true, memberships: { some: { projectId } } }, include: { organization: { select: { name: true } } }, orderBy: { name: "asc" } });
   const modules: ModuleLite[] = modulePaths(project.modules).map((m) => ({ id: m.id, name: m.name, parentId: m.parentId, order: m.order, path: m.path }));
   const types: TypeLite[] = project.types.map((t) => ({
     id: t.id,
@@ -71,7 +71,7 @@ export const loadProjectMeta = cache(async (projectId: string): Promise<ProjectM
     modules,
     phases: project.phases.map((p) => ({ id: p.id, name: p.name, order: p.order, startDate: p.startDate?.toISOString() ?? null, endDate: p.endDate?.toISOString() ?? null })),
     types,
-    users: users.map((u) => ({ id: u.id, name: u.name, email: u.email, color: u.color, role: u.role as Role })),
+    users: users.map((u) => ({ id: u.id, name: u.name, email: u.email, color: u.color, role: u.role as Role, organization: u.organization?.name ?? null })),
     teams: project.teams.map((t) => ({ id: t.id, name: t.name })),
   };
 });

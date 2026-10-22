@@ -40,6 +40,14 @@ term used in the UI.
 | Process template | Prosessmal | Process (inherited process) | Copy of modules, phases, types/workflows/fields and boards. |
 | API token | API-nøkkel | Personal access token (PAT) | Acts as the user, with the user's role. |
 | Audit log | Revisjonslogg | Auditing | Logins, configuration changes, tokens, imports, deletions. |
-| Roles: Admin, Test Lead, Member, Read-only | Administrator, Testleder, Medlem, Lesetilgang | Project Administrators, Contributors, Readers, Stakeholder | Global roles (no per-project permissions yet). |
+| Global roles: Admin, Test Lead, Member, Read-only | Administrator, Testleder, Medlem, Lesetilgang | Organization owner / Project Collection Administrators | System-wide; Test Lead may create projects, Read-only can never change anything. |
+| Project member | Prosjektmedlem | Project member (Contributors/Readers group) | Only members can open a project. |
+| Project role | Prosjektrolle | Security group with permissions | Per project; default Project lead, Consultant, Customer tester, Read-only; editable permission matrix. |
+| Permission | Rettighet | Permission (Allow/Deny) | E.g. create, edit own, edit all, change state, close, assign, delete, internal comments. |
+| Locked board | Låst board | Area path security ("View work items in this node") | Items in its modules are only visible to the board's members. |
+| Internal comment | Intern kommentar | – (no direct equivalent) | Hidden from roles without "internal comments", e.g. customers. |
+| Organisation | Organisasjon | – (Entra ID tenant / guest) | The company a user belongs to; one is marked internal. |
+| Invite link | Invitasjonslenke | Invite user / guest invitation | One-time link to set a password, valid 14 days. |
+| Microsoft sign-in | Microsoft-pålogging | Microsoft Entra ID authentication | For staff in allowed domains. |
 | SIT | SIT | – | System Integration Test: consultants and key users test configured processes end to end. |
 | UAT | UAT | – | User Acceptance Test: the business confirms the solution works for them. |

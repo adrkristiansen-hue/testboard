@@ -13,6 +13,7 @@ a REST API – in English and Norwegian.
 
 - [Quick start](#quick-start)
 - [Features](#features)
+- [Access control](#access-control)
 - [Architecture](#architecture)
 - [Data model](#data-model)
 - [REST API](#rest-api)
@@ -98,19 +99,91 @@ export of any list or query.
 (save a project's process, start new projects from it), keyboard shortcuts
 (`?` lists them).
 
-### Roles
+### Global roles
 
-| Role | Can |
+What people may do *inside a project* is decided by their project role (see
+[Access control](#access-control)). The global role only covers the system:
+
+| Global role | Means |
 | --- | --- |
-| Admin | Everything, including users, audit log, all API tokens, deleting templates |
-| Test Lead | Configure projects, boards, types and workflows; shared queries; import; bulk create; delete work items |
-| Member | Create and edit work items, comment, personal queries |
-| Read-only | View everything, follow items, personal queries; no changes |
+| Admin | Sees and manages everything: all projects, users, organisations, audit log, all API tokens, templates |
+| Test Lead | Normal user who may also create new projects (and becomes their project lead) |
+| Member | Normal user |
+| Read-only | Can never change anything, whatever their project role |
 
 ### Keyboard shortcuts
 
 `?` help · `n` new work item · `/` filter · `e` edit title · `a` assign to me ·
 `Ctrl/⌘+Enter` save · `Esc` close panel.
+
+## Access control
+
+Built for a consultancy that uses TestBoard both internally and in customer
+projects, where the customer's own testers take part.
+
+**Project membership.** Only members can open a project (system admins see
+all). Add people under *Project settings → Access* by e-mail: existing users are
+added at once; new people get an account and a **one-time invite link** (valid
+14 days) to set their own password. The link is shown to copy, and e-mailed when
+e-mail is configured. The assignee and @mention lists only show project members,
+so customers never see other customers or the whole staff list.
+
+**Roles with a permission matrix.** Each project has its own roles. Four are
+created automatically and can be renamed, changed, copied or deleted:
+
+| Permission | Project lead | Consultant | Customer tester | Read-only |
+| --- | :-: | :-: | :-: | :-: |
+| See work items | ✓ | ✓ | ✓ | ✓ |
+| Create work items | ✓ | ✓ | ✓ | |
+| Edit own work items | ✓ | ✓ | ✓ | |
+| Edit all work items | ✓ | ✓ | | |
+| Move and change state (incl. "assign to me") | ✓ | ✓ | ✓ | |
+| Close and reject (Closed, Passed, Rejected, Removed) | ✓ | ✓ | | |
+| Assign to others | ✓ | ✓ | | |
+| Delete work items | ✓ | | | |
+| Comment | ✓ | ✓ | ✓ | |
+| See and write internal comments | ✓ | ✓ | | |
+| Share queries | ✓ | | | |
+| Export | ✓ | ✓ | ✓ | ✓ |
+| Import and bulk create | ✓ | ✓ | | |
+| Configure boards | ✓ | ✓ | | |
+| Configure project (modules, phases, types, workflows) | ✓ | | | |
+| Manage access (members, invites, roles, locked boards) | ✓ | | | |
+
+The server checks every action against the role (UI, bulk edit, import and
+REST API alike); the UI only hides what the role cannot do. A project can never
+be left without someone who manages access.
+
+**Locked boards.** Any board can be locked to named members. Work items in a
+locked board's modules are then hidden from other project members everywhere:
+boards, lists, queries, dashboards, exports, My work, notifications, links,
+search and the API. Use it for sensitive areas such as payroll or HR cases.
+People who manage access always see everything.
+
+**Internal comments.** Comments ticked *Internal* are only shown to people whose
+role may see internal comments (by default not customer testers), including
+their notifications, screenshots and the API.
+
+**Organisations.** Admins keep a list of organisations (*Admin →
+Organisations*) and mark their own company as internal. Each user belongs to
+one. The columns *Reported by organisation* and *Assignee organisation* can be
+used in lists, queries, filters and exports, e.g. "defects reported by the
+customer".
+
+**Microsoft sign-in (Entra ID).** Staff can sign in with their Microsoft
+account; customers keep using invite links and passwords.
+
+1. In Entra ID, register an app (single tenant) with redirect URI
+   `{APP_URL}/auth/microsoft/callback` and create a client secret.
+2. Set `MS_ENTRA_TENANT_ID`, `MS_ENTRA_CLIENT_ID`, `MS_ENTRA_CLIENT_SECRET`
+   and `MS_ENTRA_ALLOWED_DOMAINS` (e.g. `sariba.no,sariba.se,sariba.es`).
+3. Only those domains can use Microsoft sign-in. New people from them get an
+   account on first sign-in (in the organisation `MS_ENTRA_ORGANIZATION`) and
+   still need to be added to projects. Set `MS_ENTRA_AUTO_CREATE=false` to only
+   allow people an admin has created.
+
+The sign-in uses OpenID Connect with PKCE; the ID token's signature, issuer,
+audience, tenant and nonce are verified.
 
 ## Architecture
 
@@ -295,6 +368,9 @@ rows shown. CSV is UTF-8 with BOM and uses `;` as separator in Norwegian
 | `EMAIL_TRANSPORT` | `console` (log, default) or `file` (write `.eml` files) |
 | `EMAIL_OUTBOX_DIR` | Folder for the `file` transport, default `outbox` |
 | `EMAIL_FROM` | Sender address |
+| `MS_ENTRA_TENANT_ID` / `MS_ENTRA_CLIENT_ID` / `MS_ENTRA_CLIENT_SECRET` | Microsoft sign-in (optional) |
+| `MS_ENTRA_ALLOWED_DOMAINS` | E-mail domains that may sign in with Microsoft |
+| `MS_ENTRA_AUTO_CREATE` / `MS_ENTRA_ORGANIZATION` | Create accounts on first Microsoft sign-in, and in which organisation |
 
 A real mail service (SMTP, SendGrid, Microsoft Graph) is added as a new
 transport in `src/server/email.ts`.
@@ -339,8 +415,13 @@ keyboard testing; not yet audited with a screen reader or axe-core.
 - **Board column mapping** can map several states to one column; dropping a
   card uses the first state. The Doing/Done flag is stored on the item, so it is
   shared by all boards showing it.
-- **No per-project permissions.** Roles are global; every user sees every
-  project.
+- **Locked boards hide by module.** Visibility follows the modules a locked
+  board shows; an item without a module is visible to all project members.
+- **Comment counts on cards** include internal comments, so a customer can see
+  that a card has more comments than they can read.
+- **Microsoft sign-in** has been tested up to the redirect to Microsoft and the
+  rejection of forged callbacks; the token exchange needs a real Entra ID app
+  registration to test end to end.
 - **REST API**: no rate limiting, no webhooks, no attachment upload; comments
   are plain text (no @mentions).
 - **Import** creates new items only (no update/merge by external id) and
@@ -354,7 +435,8 @@ keyboard testing; not yet audited with a screen reader or axe-core.
 
 1. PostgreSQL option and server-side filtering/pagination for very large
    projects.
-2. Per-project membership and permissions; SSO (Microsoft Entra ID) login.
+2. Group-based access (Entra ID groups → project roles) and a customer portal
+   view with a simpler form for business testers.
 3. Real e-mail transport (SMTP/Graph) and a daily digest; Teams/Slack webhooks.
 4. Test plans and test runs (several runs of the same test case per phase, with
    per-step results), like Azure Test Plans.

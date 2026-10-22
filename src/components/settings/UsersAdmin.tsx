@@ -17,9 +17,11 @@ interface Row {
   color: string;
   active: boolean;
   password?: string;
+  organizationId: string | null;
+  authProvider?: string;
 }
 
-export function UsersAdmin({ users }: { users: Row[]; currentUserId: string }) {
+export function UsersAdmin({ users, organizations }: { users: Row[]; currentUserId: string; organizations: { id: string; name: string; internal: boolean }[] }) {
   const t = useT();
   const toast = useToast();
   const router = useRouter();
@@ -38,16 +40,18 @@ export function UsersAdmin({ users }: { users: Row[]; currentUserId: string }) {
     <div className="flex flex-col gap-3">
       <div className="flex items-center">
         <h1 className="text-lg font-semibold">{t("admin.users")}</h1>
-        <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={() => setEditing({ name: "", email: "", role: "MEMBER", color: "#2563eb", active: true, password: "" })}>
+        <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={() => setEditing({ name: "", email: "", role: "MEMBER", color: "#2563eb", active: true, password: "", organizationId: null })}>
           + {t("admin.addUser")}
         </button>
       </div>
+      <p className="text-sm text-ink-muted">{t("admin.rolesHint")}</p>
       <div className="card-panel overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs text-ink-muted">
               <th className="p-2">{t("common.name")}</th>
               <th className="p-2">{t("login.email")}</th>
+              <th className="p-2">{t("access.organization")}</th>
               <th className="p-2">{t("admin.role")}</th>
               <th className="p-2">{t("admin.active")}</th>
               <th className="p-2">
@@ -65,6 +69,7 @@ export function UsersAdmin({ users }: { users: Row[]; currentUserId: string }) {
                   </span>
                 </td>
                 <td className="p-2">{u.email}</td>
+                <td className="p-2">{organizations.find((o) => o.id === u.organizationId)?.name ?? "–"}</td>
                 <td className="p-2">{t(`role.${u.role}` as MessageKey)}</td>
                 <td className="p-2">{u.active ? t("common.yes") : t("common.no")}</td>
                 <td className="p-2 text-right">
@@ -106,6 +111,20 @@ export function UsersAdmin({ users }: { users: Row[]; currentUserId: string }) {
               {ROLES.map((r) => (
                 <option key={r} value={r}>
                   {t(`role.${r}` as MessageKey)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="u-org">
+              {t("access.organization")}
+            </label>
+            <select id="u-org" className="input" value={editing.organizationId ?? ""} onChange={(e) => setEditing({ ...editing, organizationId: e.target.value || null })}>
+              <option value="">{t("access.noOrganization")}</option>
+              {organizations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                  {o.internal ? ` (${t("access.internal")})` : ""}
                 </option>
               ))}
             </select>

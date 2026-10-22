@@ -43,6 +43,8 @@ const FIELD_LABEL_KEYS: Record<string, MessageKey> = {
   childCount: "field.children",
   overdue: "field.overdue",
   parentId: "field.parent",
+  createdByOrg: "field.createdByOrg",
+  assignedOrg: "field.assignedOrg",
 };
 
 function opsFor(field: string): Op[] {
@@ -155,6 +157,7 @@ function ValueInput({ field, multi, value, onChange }: { field: string; multi: b
   else if (ft === "type") options = meta.types.map((ty) => ({ value: ty.key, label: ty.name }));
   else if (ft === "state") options = [...new Set(meta.types.flatMap((ty) => ty.states.map((s) => s.name)))].map((s) => ({ value: s, label: s }));
   else if (ft === "category") options = STATE_CATEGORIES.map((c) => ({ value: c, label: t(`category.${c}` as MessageKey) }));
+  else if (field === "createdByOrg" || field === "assignedOrg") options = [...new Set(meta.users.map((u) => u.organization).filter((o): o is string => !!o))].sort().map((o) => ({ value: o, label: o }));
   else if (field === "priority" || field === "severity") options = [1, 2, 3, 4].map((p) => ({ value: p, label: String(p) }));
   else if (ft === "boolean") options = [{ value: "true", label: t("common.yes") }, { value: "false", label: t("common.no") }];
   else if (field.startsWith("fields.")) {

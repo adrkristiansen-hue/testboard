@@ -6,6 +6,7 @@ import type { MessageKey } from "@/lib/i18n";
 
 const LINKS: { key: string; href: string; label: MessageKey }[] = [
   { key: "users", href: "/admin/users", label: "nav.users" },
+  { key: "organizations", href: "/admin/organizations", label: "nav.organizations" },
   { key: "audit", href: "/admin/audit", label: "nav.audit" },
   { key: "tokens", href: "/admin/tokens", label: "nav.apiTokens" },
   { key: "templates", href: "/admin/templates", label: "nav.templates" },

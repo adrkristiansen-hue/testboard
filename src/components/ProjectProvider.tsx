@@ -22,6 +22,7 @@ const Ctx = createContext<ProjectCtx | null>(null);
 export function ProjectProvider({ meta, access, children }: { meta: ProjectMeta; access: ClientAccess; children: ReactNode }) {
   const value = useMemo<ProjectCtx>(() => {
     const perms = new Set(access.permissions);
+    const userOrg = new Map(meta.users.map((u) => [u.id, u.organization ?? null]));
     const typeById = new Map(meta.types.map((t) => [t.id, t]));
     const subtree = buildModuleSubtree(meta.modules);
     return {
@@ -30,7 +31,7 @@ export function ProjectProvider({ meta, access, children }: { meta: ProjectMeta;
       userById: new Map(meta.users.map((u) => [u.id, u])),
       moduleById: new Map(meta.modules.map((m) => [m.id, m])),
       phaseById: new Map(meta.phases.map((p) => [p.id, p])),
-      queryContext: (currentUserId?: string) => ({ currentUserId, types: typeById, moduleSubtree: subtree, now: new Date() }),
+      queryContext: (currentUserId?: string) => ({ currentUserId, types: typeById, moduleSubtree: subtree, now: new Date(), userOrg }),
       access,
       can: (p: Permission) => hasPermission(perms, p),
     };
