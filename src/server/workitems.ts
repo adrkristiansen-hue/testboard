@@ -270,6 +270,7 @@ export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: Curr
     requiredPermissions(isOrderOnly ? [{ field: "boardOrder" }] : changes, {
       isOwnItem: item.createdById === user.id,
       userId: user.id,
+      typeKey: type.key,
       newStateCategory: newState !== item.state ? categoryOf({ states: type.states }, newState) : undefined,
     }),
   );

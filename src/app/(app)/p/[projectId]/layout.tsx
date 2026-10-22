@@ -15,6 +15,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const links = [
     { href: `/p/${projectId}/boards`, label: t("nav.board"), icon: "▦" },
     { href: `/p/${projectId}/items`, label: t("nav.items"), icon: "☰" },
+    { href: `/p/${projectId}/scripts`, label: t("nav.scripts"), icon: "☑" },
     { href: `/p/${projectId}/queries`, label: t("nav.queries"), icon: "⌕" },
     { href: `/p/${projectId}/dashboard`, label: t("nav.dashboard"), icon: "▥" },
     ...(p.has("items.import") ? [{ href: `/p/${projectId}/import`, label: t("nav.import"), icon: "⇪" }] : []),

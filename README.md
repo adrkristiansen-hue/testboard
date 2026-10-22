@@ -67,6 +67,22 @@ parent/child and related/blocks/duplicate links, full field history,
 discussion with @mentions (people and teams), #ID references and reactions.
 "Create defect from failure" pre-fills a defect from a failed test.
 
+**Test scripts** – a library of reusable scripts (TS-1, TS-2 …) with role,
+preconditions, test data, steps and the fields the tester must fill in before
+starting (e.g. test user, employee ID). Scripts are Draft → Approved → Retired;
+editing an approved script creates a new version that must be approved again,
+and runs already planned keep the version they copied. *Plan test runs* creates
+one test run (a Test Task) per script × tester in a phase; phases can require
+approved scripts (UAT does by default). The **run mode** shows one step at a
+time with Passed/Failed/Blocked/Skipped (keys P/F/B/S, J/K to move), actual
+result and pasted screenshots per step, saved immediately. From a failed step:
+*Create defect* (steps to reproduce, test user, test data, expected/actual and
+screenshots filled in, linked as a child), *This is a change* (change request)
+or *Script is wrong* (flags the script for review instead of raising a false
+defect). When the last defect from a failed run is fixed, the tester is
+notified, and the retest starts at the failed step with earlier steps carried
+over. Every attempt is kept.
+
 **Boards** – one Kanban board per team, showing the work in the team's
 modules. Configurable columns (state mapping per type, Doing/Done split, WIP
 limits), swimlanes (by module, assignee, priority or custom rules), card fields
@@ -137,18 +153,25 @@ created automatically and can be renamed, changed, copied or deleted:
 | Create work items | ✓ | ✓ | ✓ | |
 | Edit own work items | ✓ | ✓ | ✓ | |
 | Edit all work items | ✓ | ✓ | | |
-| Move and change state (incl. "assign to me") | ✓ | ✓ | ✓ | |
-| Close and reject (Closed, Passed, Rejected, Removed) | ✓ | ✓ | | |
+| Move and change state (incl. "assign to me", running tests and recording results) | ✓ | ✓ | ✓ | |
+| Close and reject (Closed, Rejected, Removed) | ✓ | ✓ | | |
 | Assign to others | ✓ | ✓ | | |
 | Delete work items | ✓ | | | |
 | Comment | ✓ | ✓ | ✓ | |
 | See and write internal comments | ✓ | ✓ | | |
 | Share queries | ✓ | | | |
+| Write test scripts | ✓ | ✓ | | |
+| Approve test scripts | ✓ | | | |
 | Export | ✓ | ✓ | ✓ | ✓ |
 | Import and bulk create | ✓ | ✓ | | |
 | Configure boards | ✓ | ✓ | | |
 | Configure project (modules, phases, types, workflows) | ✓ | | | |
 | Manage access (members, invites, roles, locked boards) | ✓ | | | |
+
+Recording a test result (also Passed) counts as "change state", not "close",
+so customer testers can run their tests. Customer testers can read scripts and
+run the tests assigned to them, but not change scripts; anyone with "edit all
+work items" can record results on any run.
 
 The server checks every action against the role (UI, bulk edit, import and
 REST API alike); the UI only hides what the role cannot do. A project can never
@@ -280,6 +303,10 @@ erDiagram
   User ||--o{ SavedQuery : owns
   User ||--o{ ApiToken : owns
   User ||--o{ AuditLog : "actor of"
+  Project ||--o{ TestScript : "script library"
+  TestScript ||--o{ WorkItem : "test runs (scriptId, scriptVersion)"
+  WorkItem ||--o{ TestAttempt : "attempts (retests)"
+  TestAttempt ||--o{ TestStepResult : "per-step results"
   ProcessTemplate {
     string name
     json content "modules, phases, types, boards"
@@ -309,6 +336,11 @@ Notes:
 - `HistoryEntry` holds one row per changed field; `rev` groups a save. The
   cumulative flow and burn-down charts are replayed from it.
 - Team swimlanes and card settings are JSON on `Team`.
+- A test run is a normal Test Task with `scriptId`/`scriptVersion` and a copy of
+  the script's steps in `fields.steps`, so boards, lists, queries and the
+  dashboard work unchanged. `TestAttempt` stores the tester's inputs (test
+  user …) and outcome; `TestStepResult` the result, actual result, screenshot
+  attachment ids and items raised per step.
 
 ## REST API
 
@@ -379,8 +411,8 @@ transport in `src/server/email.ts`.
 
 | Script | Purpose |
 | --- | --- |
-| `npm test` | Unit tests (Vitest): workflow, board mapping, swimlanes, queries, mentions, import, export columns, tree, dashboard and board metrics, e-mail content |
-| `npm run test:e2e` | Playwright smoke tests (board, collaboration, lists/queries/dashboard, import, API, templates, shortcuts). Needs `npx playwright install chromium`, or set `PW_CHROMIUM_PATH` to an existing Chromium. Reuses a dev server on `E2E_PORT` (default 3100). |
+| `npm test` | Unit tests (Vitest): workflow, board mapping, swimlanes, queries, mentions, import, export columns, tree, dashboard and board metrics, e-mail content, permissions, Microsoft sign-in rules, test scripts (versions, planning, outcomes, retests, defect pre-fill) |
+| `npm run test:e2e` | Playwright smoke tests (board, collaboration, lists/queries/dashboard, import, API, templates, shortcuts, access control, test scripts from writing to retest). Needs `npx playwright install chromium`, or set `PW_CHROMIUM_PATH` to an existing Chromium. Reuses a dev server on `E2E_PORT` (default 3100). |
 | `npm run typecheck` / `npm run lint` | Static checks |
 | `npm run db:seed` | Reset demo data |
 | `npm run db:perf-seed` | Add 600 extra work items for load testing (`npm run db:seed` to reset) |
@@ -422,6 +454,11 @@ keyboard testing; not yet audited with a screen reader or axe-core.
 - **Microsoft sign-in** has been tested up to the redirect to Microsoft and the
   rejection of forged callbacks; the token exchange needs a real Entra ID app
   registration to test end to end.
+- **Test scripts** (phase 6A): no Excel import or paste of steps yet, no shared
+  step blocks or parameters, and no script-level reports (pass rate per script,
+  steps that fail most). Scripts and test runs are not in the REST API. Results
+  are stored per step index, so editing the steps of a run that has results can
+  misalign them; change the script and plan a new run instead.
 - **REST API**: no rate limiting, no webhooks, no attachment upload; comments
   are plain text (no @mentions).
 - **Import** creates new items only (no update/merge by external id) and
@@ -438,8 +475,9 @@ keyboard testing; not yet audited with a screen reader or axe-core.
 2. Group-based access (Entra ID groups → project roles) and a customer portal
    view with a simpler form for business testers.
 3. Real e-mail transport (SMTP/Graph) and a daily digest; Teams/Slack webhooks.
-4. Test plans and test runs (several runs of the same test case per phase, with
-   per-step results), like Azure Test Plans.
+4. Test scripts phase 6B: shared step blocks, parameters, Excel import and
+   paste of steps, approval workflow with comments, and script reports
+   (execution progress, steps that fail most, traceability to defects).
 5. Import updates by external id (round-trip with Excel), and SuccessFactors
    test case catalogues as templates.
 6. Webhooks and rate limiting for the REST API.

@@ -35,6 +35,8 @@ export interface PhaseLite {
   startDate: string | null;
   endDate: string | null;
   order: number;
+  /** Only approved test scripts can be planned in this phase */
+  requireApprovedScripts?: boolean;
 }
 
 export interface StateLite {
@@ -107,7 +109,7 @@ export function isAdmin(role: Role | string): boolean {
 
 export interface NotificationView {
   id: string;
-  /** ASSIGNED | MENTIONED | STATE_CHANGED | COMMENTED */
+  /** ASSIGNED | MENTIONED | STATE_CHANGED | COMMENTED | RETEST */
   type: string;
   message: string;
   read: boolean;

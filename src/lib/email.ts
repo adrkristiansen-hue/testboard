@@ -1,6 +1,6 @@
 // Notification email content (pure, unit-tested). Transport lives in src/server/email.ts.
 
-export type NotificationType = "ASSIGNED" | "MENTIONED" | "STATE_CHANGED" | "COMMENTED";
+export type NotificationType = "ASSIGNED" | "MENTIONED" | "STATE_CHANGED" | "COMMENTED" | "RETEST";
 
 export interface EmailMessage {
   to: string;
@@ -27,6 +27,7 @@ const SUBJECT_PREFIX: Record<NotificationType, string> = {
   MENTIONED: "You were mentioned",
   STATE_CHANGED: "State changed",
   COMMENTED: "New comment",
+  RETEST: "Ready for retest",
 };
 
 export function itemUrl(appUrl: string, projectId: string, itemId: number): string {

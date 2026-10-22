@@ -9,6 +9,7 @@ import type { MessageKey } from "@/lib/i18n";
 import type { RtDoc } from "@/lib/richtext";
 import type { TypeLite } from "@/lib/types";
 import { allowedTargets } from "@/lib/workflow";
+import { stateNeedsClose } from "@/lib/permissions";
 import { toDateInput, formatDateTime } from "@/lib/format";
 import { defectDefaultsFromTest, type NewItemDefaults } from "@/lib/prefill";
 import { createItem, deleteItem, getItemDetail, toggleFollow, updateItem } from "@/server/actions/items";
@@ -193,7 +194,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
     if (!type || !draft) return [];
     if (isNew) return type.states.map((s) => s.name);
     const current = base?.state ?? draft.state;
-    const closing = (name: string) => ["COMPLETED", "REMOVED"].includes(type.states.find((s) => s.name === name)?.category ?? "");
+    const closing = (name: string) => stateNeedsClose(type.key, type.states.find((s) => s.name === name)?.category);
     // Without "close" rights, closed/removed states are not offered.
     return [current, ...allowedTargets({ states: type.states, transitions: type.transitions }, current).filter((s) => canClose || !closing(s))];
   }, [type, draft, base, isNew, canClose]);
@@ -370,6 +371,11 @@ export function WorkItemForm(props: WorkItemFormProps) {
             </span>
           )}
           <div className="ml-auto flex items-center gap-1 normal-case">
+            {!isNew && detail && type?.key === "TEST_TASK" && (
+              <Link href={`/p/${meta.id}/items/${itemId}/run`} className="btn btn-sm btn-primary">
+                ▶ {t("item.runTest")}
+              </Link>
+            )}
             {!isNew && detail && type?.key === "TEST_TASK" && canCreate && detail.item.fields.outcome === "Failed" && (
               <button type="button" className="btn btn-sm btn-danger" onClick={createDefect}>
                 + {t("item.defectFromFailure")}

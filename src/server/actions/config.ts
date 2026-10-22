@@ -181,6 +181,7 @@ const phaseSchema = z.object({
   name: z.string().trim().min(1).max(60),
   startDate: z.string().nullable(),
   endDate: z.string().nullable(),
+  requireApprovedScripts: z.boolean().optional(),
 });
 
 export async function savePhase(projectId: string, input: z.infer<typeof phaseSchema>): Promise<ActionResult> {
@@ -190,10 +191,11 @@ export async function savePhase(projectId: string, input: z.infer<typeof phaseSc
     const start = p.startDate ? new Date(p.startDate) : null;
     const end = p.endDate ? new Date(p.endDate) : null;
     if (start && end && end < start) throw new UserError("End date must be after start date.");
-    if (p.id) await db.phase.update({ where: { id: p.id }, data: { name: p.name, startDate: start, endDate: end } });
+    const flag = p.requireApprovedScripts === undefined ? {} : { requireApprovedScripts: p.requireApprovedScripts };
+    if (p.id) await db.phase.update({ where: { id: p.id }, data: { name: p.name, startDate: start, endDate: end, ...flag } });
     else {
       const max = await db.phase.aggregate({ where: { projectId }, _max: { order: true } });
-      await db.phase.create({ data: { projectId, name: p.name, startDate: start, endDate: end, order: (max._max.order ?? -1) + 1 } });
+      await db.phase.create({ data: { projectId, name: p.name, startDate: start, endDate: end, order: (max._max.order ?? -1) + 1, ...flag } });
     }
     await audit(user.id, p.id ? "phase.update" : "phase.create", "Phase", p.id, p);
     return undefined;

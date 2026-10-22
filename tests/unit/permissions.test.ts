@@ -16,6 +16,22 @@ describe("effectivePermissions", () => {
   });
 });
 
+describe("test results", () => {
+  it("recording Passed on a test task needs change state, not close", () => {
+    expect(requiredPermissions([{ field: "state" }], { isOwnItem: false, newStateCategory: "COMPLETED", typeKey: "TEST_TASK" })).toEqual(["items.changeState"]);
+    expect(requiredPermissions([{ field: "state" }], { isOwnItem: false, newStateCategory: "COMPLETED", typeKey: "DEFECT" })).toEqual(["items.close"]);
+    // The outcome field follows the state, so it is part of recording the result
+    expect(requiredPermissions([{ field: "state" }, { field: "fields.outcome" }], { isOwnItem: false, newStateCategory: "IN_PROGRESS", typeKey: "TEST_TASK" })).toEqual(["items.changeState"]);
+    expect(requiredPermissions([{ field: "fields.steps" }], { isOwnItem: false, typeKey: "TEST_TASK" })).toEqual(["items.edit"]);
+  });
+  it("customer testers cannot change test scripts; leads can approve", () => {
+    expect(role("CUSTOMER_TESTER")).not.toContain("scripts.edit");
+    expect(role("CONSULTANT")).toContain("scripts.edit");
+    expect(role("CONSULTANT")).not.toContain("scripts.approve");
+    expect(role("LEAD")).toContain("scripts.approve");
+  });
+});
+
 describe("requiredPermissions", () => {
   it("needs close for closing/removing states and changeState otherwise", () => {
     expect(requiredPermissions([{ field: "state" }], { isOwnItem: false, newStateCategory: "COMPLETED" })).toEqual(["items.close"]);

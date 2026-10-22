@@ -5,7 +5,7 @@ import type { PrismaClient } from "../generated/prisma/client";
 export interface TemplateContent {
   version: 1;
   modules: { path: string; name: string; parentPath: string | null; order: number }[];
-  phases: { name: string; order: number }[];
+  phases: { name: string; order: number; requireApprovedScripts?: boolean }[];
   types: { key: string; name: string; icon: string; color: string; disabled: boolean; order: number; fields: string; transitions: string; states: { name: string; category: string; color: string; order: number }[] }[];
   teams: {
     name: string;
@@ -56,7 +56,7 @@ export async function templateFromProject(client: PrismaClient, projectId: strin
   return {
     version: 1,
     modules,
-    phases: p.phases.map((ph) => ({ name: ph.name, order: ph.order })),
+    phases: p.phases.map((ph) => ({ name: ph.name, order: ph.order, requireApprovedScripts: ph.requireApprovedScripts })),
     types: p.types.map((t) => ({ key: t.key, name: t.name, icon: t.icon, color: t.color, disabled: t.disabled, order: t.order, fields: t.fields, transitions: t.transitions, states: t.states.map((s) => ({ name: s.name, category: s.category, color: s.color, order: s.order })) })),
     teams: p.teams.map((tm) => ({
       name: tm.name,
@@ -82,7 +82,7 @@ export async function createProjectFromTemplate(client: PrismaClient, data: { na
     const row = await client.module.create({ data: { projectId: project.id, name: m.name, order: m.order, parentId: m.parentPath ? (moduleIds.get(m.parentPath) ?? null) : null } });
     moduleIds.set(m.path, row.id);
   }
-  for (const ph of c.phases) await client.phase.create({ data: { projectId: project.id, name: ph.name, order: ph.order } });
+  for (const ph of c.phases) await client.phase.create({ data: { projectId: project.id, name: ph.name, order: ph.order, requireApprovedScripts: !!ph.requireApprovedScripts } });
   const typeIds = new Map<string, string>();
   for (const t of c.types) {
     const row = await client.workItemType.create({

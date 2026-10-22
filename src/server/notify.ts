@@ -5,6 +5,9 @@ import { appUrl, emailEnabled, sendMail } from "./email";
 import { buildNotificationEmail, type NotificationType } from "@/lib/email";
 import { can, canSeeItem, getAccess } from "./access";
 import type { Role } from "@/lib/types";
+import { loadProjectMeta } from "./projects";
+import { categoryOf } from "@/lib/workflow";
+import { readyForRetest } from "@/lib/testscripts";
 
 interface Change {
   field: string;
@@ -76,7 +79,29 @@ export async function notifyItemChange(args: { itemId: number; actor: CurrentUse
   if (state) {
     const followers = await followerIds(itemId);
     await send(followers, "STATE_CHANGED", itemId, actor, `${actor.name} changed #${itemId} ${item.title}: ${state.oldValue} → ${state.newValue}`);
+    await notifyRetest(itemId, actor);
   }
+}
+
+/**
+ * When the last open defect raised from a failed test run is fixed, tell the run's tester it is ready for retest.
+ * The notification points at the test run.
+ */
+async function notifyRetest(defectId: number, actor: CurrentUser) {
+  const defect = await db.workItem.findUnique({ where: { id: defectId }, select: { parentId: true, projectId: true, typeId: true, state: true, title: true } });
+  if (!defect?.parentId) return;
+  const meta = await loadProjectMeta(defect.projectId);
+  const typeOf = (id: string) => meta?.types.find((t) => t.id === id);
+  const dType = typeOf(defect.typeId);
+  if (dType?.key !== "DEFECT" || categoryOf({ states: dType.states }, defect.state) !== "RESOLVED") return;
+  const runItem = await db.workItem.findUnique({ where: { id: defect.parentId }, select: { id: true, title: true, typeId: true, state: true, assignedToId: true, children: { select: { typeId: true, state: true } } } });
+  if (!runItem?.assignedToId || typeOf(runItem.typeId)?.key !== "TEST_TASK") return;
+  const defects = runItem.children
+    .map((c) => ({ t: typeOf(c.typeId), state: c.state }))
+    .filter((c) => c.t?.key === "DEFECT")
+    .map((c) => ({ category: categoryOf({ states: c.t!.states }, c.state) ?? "" }));
+  if (!readyForRetest(runItem.state, defects)) return;
+  await send([runItem.assignedToId], "RETEST", runItem.id, actor, `#${defectId} ${defect.title} is fixed – retest #${runItem.id} ${runItem.title}`);
 }
 
 /** One summary notification per assignee after a bulk create/assign. Links to the first item. */

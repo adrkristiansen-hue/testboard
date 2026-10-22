@@ -49,5 +49,10 @@ term used in the UI.
 | Organisation | Organisasjon | – (Entra ID tenant / guest) | The company a user belongs to; one is marked internal. |
 | Invite link | Invitasjonslenke | Invite user / guest invitation | One-time link to set a password, valid 14 days. |
 | Microsoft sign-in | Microsoft-pålogging | Microsoft Entra ID authentication | For staff in allowed domains. |
+| Test script | Testskript | Test Case (Azure Test Plans) | Reusable recipe (TS-n): steps, preconditions, test data, inputs; Draft/Approved/Retired with versions. |
+| Test run | Kjøring | Test point / test run | A Test Task planned from a script for one tester in one phase; shows on boards like any test task. |
+| Attempt | Forsøk | Test run iteration / rerun | One execution of a test run; a retest is a new attempt starting at the failed step. |
+| Step result | Stegresultat | Test step outcome | Passed, Failed, Blocked or Skipped, with actual result and screenshots. |
+| Approved scripts only | Kun godkjente skript | – | Phase setting (typical for UAT): only approved scripts can be planned. |
 | SIT | SIT | – | System Integration Test: consultants and key users test configured processes end to end. |
 | UAT | UAT | – | User Acceptance Test: the business confirms the solution works for them. |

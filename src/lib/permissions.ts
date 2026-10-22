@@ -16,6 +16,8 @@ export const PERMISSIONS = [
   "items.export",
   "items.import",
   "queries.share",
+  "scripts.edit",
+  "scripts.approve",
   "boards.configure",
   "project.configure",
   "access.manage",
@@ -26,6 +28,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const PERMISSION_GROUPS: { key: string; permissions: Permission[] }[] = [
   { key: "items", permissions: ["items.view", "items.create", "items.editOwn", "items.edit", "items.changeState", "items.close", "items.assign", "items.delete"] },
   { key: "collaboration", permissions: ["comments.add", "comments.internal", "queries.share"] },
+  { key: "testing", permissions: ["scripts.edit", "scripts.approve"] },
   { key: "data", permissions: ["items.export", "items.import"] },
   { key: "admin", permissions: ["boards.configure", "project.configure", "access.manage"] },
 ];
@@ -46,13 +49,13 @@ export const DEFAULT_ROLES: RoleTemplate[] = [
     key: "CONSULTANT",
     name: "Consultant",
     nameNb: "Konsulent",
-    permissions: ["items.view", "items.create", "items.editOwn", "items.edit", "items.changeState", "items.close", "items.assign", "comments.add", "comments.internal", "items.export", "items.import", "boards.configure"],
+    permissions: ["items.view", "items.create", "items.editOwn", "items.edit", "items.changeState", "items.close", "items.assign", "comments.add", "comments.internal", "items.export", "items.import", "boards.configure", "scripts.edit"],
   },
   {
     key: "CUSTOMER_TESTER",
     name: "Customer tester",
     nameNb: "Kundetester",
-    // Customers report and test, comment and move their own work, but do not close, delete or see internal notes.
+    // Customers report and test, comment and move their own work, but do not close, delete, change test scripts or see internal notes.
     permissions: ["items.view", "items.create", "items.editOwn", "items.changeState", "comments.add", "items.export"],
   },
   { key: "READER", name: "Read-only", nameNb: "Lesetilgang", permissions: ["items.view", "items.export"] },
@@ -82,6 +85,15 @@ export function effectivePermissions(globalRole: Role, rolePermissions: Permissi
   return perms;
 }
 
+/**
+ * Whether moving to a state counts as closing. Recording a test result (Passed is a "Completed" state)
+ * is part of testing, so it needs "change state" like any other move, not "close".
+ */
+export function stateNeedsClose(typeKey: string | undefined, category: StateCategory | undefined): boolean {
+  if (typeKey === "TEST_TASK") return false;
+  return category === "COMPLETED" || category === "REMOVED";
+}
+
 export interface ChangeLike {
   field: string;
   newValue?: string | null;
@@ -91,11 +103,13 @@ export interface ChangeLike {
  * Which permission each change needs. `newStateCategory` is the category of the target state
  * when the state changes. Editing fields needs "items.edit", or "items.editOwn" on own items.
  */
-export function requiredPermissions(changes: ChangeLike[], ctx: { isOwnItem: boolean; newStateCategory?: StateCategory; userId?: string }): Permission[] {
+export function requiredPermissions(changes: ChangeLike[], ctx: { isOwnItem: boolean; newStateCategory?: StateCategory; userId?: string; typeKey?: string }): Permission[] {
   const need = new Set<Permission>();
   for (const c of changes) {
-    if (c.field === "state") need.add(ctx.newStateCategory === "COMPLETED" || ctx.newStateCategory === "REMOVED" ? "items.close" : "items.changeState");
+    if (c.field === "state") need.add(stateNeedsClose(ctx.typeKey, ctx.newStateCategory) ? "items.close" : "items.changeState");
     else if (c.field === "columnDone" || c.field === "boardOrder") need.add("items.changeState");
+    // The outcome of a test task is its test result, kept in sync with the state.
+    else if (c.field === "fields.outcome" && ctx.typeKey === "TEST_TASK") need.add("items.changeState");
     // Taking a work item yourself ("Assign to me") counts as moving work, not as assigning others.
     else if (c.field === "assignedToId") need.add(ctx.userId && c.newValue === ctx.userId ? "items.changeState" : "items.assign");
     else need.add(ctx.isOwnItem ? "items.editOwn" : "items.edit");

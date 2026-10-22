@@ -265,7 +265,7 @@ function Phases() {
   const t = useT();
   const { meta } = useProject();
   const { pending, exec } = useAction();
-  const [rows, setRows] = useState(meta.phases.map((p) => ({ id: p.id as string | undefined, name: p.name, startDate: toDateInput(p.startDate), endDate: toDateInput(p.endDate) })));
+  const [rows, setRows] = useState(meta.phases.map((p) => ({ id: p.id as string | undefined, name: p.name, startDate: toDateInput(p.startDate), endDate: toDateInput(p.endDate), requireApprovedScripts: !!p.requireApprovedScripts })));
   const update = (i: number, patch: Partial<(typeof rows)[number]>) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   return (
     <div className="flex flex-col gap-3">
@@ -277,6 +277,7 @@ function Phases() {
               <th className="p-2">{t("common.name")}</th>
               <th className="p-2">{t("settings.startDate")}</th>
               <th className="p-2">{t("settings.endDate")}</th>
+              <th className="p-2">{t("settings.requireApproved")}</th>
               <th className="p-2">
                 <span className="sr-only">{t("common.actions")}</span>
               </th>
@@ -294,8 +295,11 @@ function Phases() {
                 <td className="p-2">
                   <input aria-label={t("settings.endDate")} type="date" className="input" value={p.endDate} onChange={(e) => update(i, { endDate: e.target.value })} />
                 </td>
+                <td className="p-2">
+                  <input aria-label={`${t("settings.requireApproved")} ${p.name}`} title={t("settings.requireApprovedHint")} type="checkbox" checked={p.requireApprovedScripts} onChange={(e) => update(i, { requireApprovedScripts: e.target.checked })} />
+                </td>
                 <td className="whitespace-nowrap p-2">
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={pending} onClick={() => exec(() => savePhase(meta.id, { id: p.id, name: p.name, startDate: p.startDate || null, endDate: p.endDate || null }))}>
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={pending} onClick={() => exec(() => savePhase(meta.id, { id: p.id, name: p.name, startDate: p.startDate || null, endDate: p.endDate || null, requireApprovedScripts: p.requireApprovedScripts }))}>
                     {t("common.save")}
                   </button>
                   {p.id && (
@@ -310,7 +314,7 @@ function Phases() {
         </table>
       </div>
       <div>
-        <button type="button" className="btn btn-secondary" onClick={() => setRows((r) => [...r, { id: undefined, name: "Hypercare", startDate: "", endDate: "" }])}>
+        <button type="button" className="btn btn-secondary" onClick={() => setRows((r) => [...r, { id: undefined, name: "Hypercare", startDate: "", endDate: "", requireApprovedScripts: false }])}>
           + {t("settings.addPhase")}
         </button>
       </div>

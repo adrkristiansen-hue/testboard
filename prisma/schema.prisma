@@ -146,6 +146,7 @@ model Project {
   savedQueries SavedQuery[]
   roles        ProjectRole[]
   members      ProjectMember[]
+  testScripts  TestScript[]
 }
 
 model Module {
@@ -160,6 +161,7 @@ model Module {
   children  Module[]     @relation("ModuleTree")
   workItems WorkItem[]
   teams     TeamModule[]
+  scripts   TestScript[]
 
   @@index([projectId])
 }
@@ -171,6 +173,8 @@ model Phase {
   startDate DateTime?
   endDate   DateTime?
   order     Int       @default(0)
+  /// Only approved test scripts can be planned in this phase (e.g. UAT)
+  requireApprovedScripts Boolean @default(false)
 
   project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workItems WorkItem[]
@@ -315,6 +319,9 @@ model WorkItem {
   createdAt       DateTime  @default(now())
   changedById     String
   changedAt       DateTime  @default(now())
+  /// Test runs: the script this test task was planned from, and the script version it copied
+  scriptId        String?
+  scriptVersion   Int?
 
   project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   type       WorkItemType @relation(fields: [typeId], references: [id])
@@ -333,10 +340,13 @@ model WorkItem {
   linksTo      WorkItemLink[] @relation("LinkTarget")
   follows      Follow[]
   notifications Notification[]
+  script       TestScript?    @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+  attempts     TestAttempt[]
 
   @@index([projectId, state])
   @@index([assignedToId])
   @@index([parentId])
+  @@index([scriptId])
 }
 
 /// Non-hierarchical links. Parent/child is WorkItem.parentId.
@@ -499,4 +509,84 @@ model ProcessTemplate {
   /// Serialized modules, phases, types, workflows, teams/columns/swimlanes
   content     String
   createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Test scripts and test execution
+// ---------------------------------------------------------------------------
+
+/// A reusable test script (the recipe). Test runs are Test Task work items planned from it.
+model TestScript {
+  id            String    @id @default(cuid())
+  projectId     String
+  /// Per-project number, shown as TS-<number>
+  number        Int
+  title         String
+  moduleId      String?
+  /// Who performs the test, e.g. "HR administrator"
+  role          String    @default("")
+  preconditions String    @default("")
+  testData      String    @default("")
+  /// What the tester must fill in before starting, JSON string[] (e.g. ["Test employee", "Manager"])
+  inputs        String    @default("[]")
+  /// JSON TestStep[]
+  steps         String    @default("[]")
+  /// DRAFT | APPROVED | RETIRED
+  status        String    @default("DRAFT")
+  version       Int       @default(1)
+  approvedById  String?
+  approvedAt    DateTime?
+  /// Set when a tester reports that the script itself is wrong
+  reviewNote    String?
+  reviewById    String?
+  reviewAt      DateTime?
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedById   String
+  updatedAt     DateTime  @updatedAt
+
+  project Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module  Module?    @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  runs    WorkItem[]
+
+  @@unique([projectId, number])
+}
+
+/// One execution of a test run: attempt 1, then a new attempt for each retest.
+model TestAttempt {
+  id         String    @id @default(cuid())
+  workItemId Int
+  number     Int
+  testerId   String
+  /// The tester's answers to the script inputs, JSON { [label]: value }
+  inputs     String    @default("{}")
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  /// Passed | Failed | Blocked, set when the attempt is finished
+  outcome    String?
+
+  workItem WorkItem         @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  results  TestStepResult[]
+
+  @@unique([workItemId, number])
+}
+
+model TestStepResult {
+  id          String   @id @default(cuid())
+  attemptId   String
+  stepIndex   Int
+  /// Passed | Failed | Blocked | Skipped
+  outcome     String
+  actual      String   @default("")
+  /// Screenshot attachment ids on the test run, JSON string[]
+  attachments String   @default("[]")
+  /// Work items raised from this step (defects, change requests), JSON number[]
+  raised      String   @default("[]")
+  /// Copied from the previous attempt when a retest starts at the failed step
+  carried     Boolean  @default(false)
+  changedAt   DateTime @updatedAt
+
+  attempt TestAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, stepIndex])
 }

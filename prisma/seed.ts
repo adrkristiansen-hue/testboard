@@ -35,6 +35,9 @@ async function reset() {
   await db.follow.deleteMany();
   await db.mention.deleteMany();
   await db.commentReaction.deleteMany();
+  await db.testStepResult.deleteMany();
+  await db.testAttempt.deleteMany();
+  await db.testScript.deleteMany();
   await db.attachment.deleteMany();
   await db.comment.deleteMany();
   await db.historyEntry.deleteMany();
@@ -117,7 +120,7 @@ async function main() {
   // Phases (Iteration Paths): SIT 1 finished, SIT 2 running, UAT upcoming
   const P: Record<string, string> = {};
   const phase = async (key: string, name: string, order: number, start: Date, end: Date) => {
-    P[key] = (await db.phase.create({ data: { projectId: project.id, name, order, startDate: start, endDate: end } })).id;
+    P[key] = (await db.phase.create({ data: { projectId: project.id, name, order, startDate: start, endDate: end, requireApprovedScripts: key === "uat" } })).id;
   };
   await phase("sit1", "SIT 1", 0, daysFromNow(-45), daysFromNow(-22));
   await phase("sit2", "SIT 2", 1, daysFromNow(-20), daysFromNow(8));
@@ -341,6 +344,109 @@ async function main() {
     for (const f of followers) await db.follow.create({ data: { userId: f, workItemId: row.id, createdAt } });
   }
 
+  // Test scripts (the recipes) and the runs planned from them, with recorded attempts.
+  interface ScriptDef {
+    ref: string;
+    title: string;
+    module: string;
+    status: "DRAFT" | "APPROVED" | "RETIRED";
+    version?: number;
+    role: string;
+    preconditions: string;
+    testData: string;
+    inputs: string[];
+    steps: { action: string; expected: string }[];
+    runs: string[];
+    reviewNote?: string;
+  }
+  const stepsOf = (ref: string) => (items.find((i) => i.ref === ref)?.fields?.steps ?? []) as { action: string; expected: string }[];
+  const scriptDefs: ScriptDef[] = [
+    { ref: "hire-perm", title: "Hire new permanent employee – Norway", module: "hire", status: "APPROVED", role: "HR administrator", preconditions: "Company NO01 and position 'HR Advisor' exist.", testData: "Fictional person: Test Testesen", inputs: ["Test user (HR admin)", "New employee ID"], steps: stepsOf("tt-hire-perm"), runs: ["tt-hire-perm"] },
+    { ref: "hire-temp", title: "Hire temporary employee with contract end date", module: "hire", status: "APPROVED", role: "HR administrator", preconditions: "Event reason 'Temporary hire' is configured.", testData: "Contract length 6 months", inputs: ["Test user (HR admin)"], steps: stepsOf("tt-hire-temp"), runs: ["tt-hire-temp"] },
+    { ref: "rehire", title: "Rehire former employee keeping original hire date", module: "hire", status: "DRAFT", role: "HR administrator", preconditions: "A terminated employee exists in NO01.", testData: "", inputs: ["Test user (HR admin)", "Rehired employee ID"], steps: stepsOf("tt-rehire"), runs: ["tt-rehire"] },
+    {
+      ref: "transfer", title: "Transfer between legal entities", module: "job", status: "APPROVED", version: 2, role: "HR administrator", preconditions: "Employee is active in NO01; NO02 has an open position.", testData: "", inputs: ["Test user (HR admin)", "Employee ID"],
+      steps: [
+        { action: "Open the employee and choose Take Action > Change Job and Compensation Info", expected: "Job information opens in edit mode" },
+        { action: "Select event 'Legal entity transfer' and company NO02", expected: "Position list shows NO02 positions only" },
+        { action: "Save and open Employment Details", expected: "One active employment in NO02; NO01 employment ended" },
+      ],
+      runs: ["tt-transfer"],
+      reviewNote: "Step 2 (Nora Lindeberg): In the latest release the event is called 'Transfer – legal entity'. Please update the step text.",
+    },
+    {
+      ref: "term-holiday", title: "Termination – payout of holiday pay", module: "term", status: "APPROVED", role: "Payroll specialist", preconditions: "Employee has accrued holiday pay this year.", testData: "Last working day: end of this month", inputs: ["Test user (payroll)", "Employee ID"],
+      steps: [
+        { action: "Terminate the employee with reason 'Resignation'", expected: "Termination is saved" },
+        { action: "Run the final settlement simulation in ECP", expected: "Settlement includes holiday pay wage type" },
+      ],
+      runs: ["tt-term-holiday"],
+    },
+    {
+      ref: "uat-e2e", title: "UAT: End-to-end hire to first payslip", module: "hire", status: "DRAFT", role: "HR business partner", preconditions: "Payroll period for next month is open.", testData: "", inputs: ["Test user", "New employee ID"],
+      steps: [
+        { action: "Hire a new employee starting on the 1st of next month", expected: "Employee is created and visible in the org chart" },
+        { action: "Check that the employee is replicated to ECP", expected: "Employee exists in ECP with correct cost centre" },
+        { action: "Run payroll simulation for next month", expected: "Payslip is produced with correct salary" },
+      ],
+      runs: [],
+    },
+  ];
+  const SCRIPT: Record<string, string> = {};
+  for (const [i, sd] of scriptDefs.entries()) {
+    const script = await db.testScript.create({
+      data: {
+        projectId: project.id,
+        number: i + 1,
+        title: sd.title,
+        moduleId: M[sd.module],
+        role: sd.role,
+        preconditions: sd.preconditions,
+        testData: sd.testData,
+        inputs: JSON.stringify(sd.inputs),
+        steps: JSON.stringify(sd.steps),
+        status: sd.status,
+        version: sd.version ?? 1,
+        ...(sd.status === "APPROVED" ? { approvedById: U.siri, approvedAt: daysAgo(21) } : {}),
+        ...(sd.reviewNote ? { reviewNote: sd.reviewNote, reviewById: U.nora, reviewAt: daysAgo(2) } : {}),
+        createdById: U.erik,
+        updatedById: U.erik,
+        createdAt: daysAgo(25),
+      },
+    });
+    SCRIPT[sd.ref] = script.id;
+    for (const runRef of sd.runs) {
+      const run = await db.workItem.findUniqueOrThrow({ where: { id: ID[runRef] } });
+      const f = JSON.parse(run.fields) as Record<string, unknown>;
+      const desc = textToDoc([`Role: ${sd.role}`, sd.preconditions].filter(Boolean).join("\n"));
+      await db.workItem.update({
+        where: { id: run.id },
+        data: {
+          scriptId: script.id,
+          scriptVersion: sd.version ?? 1,
+          description: JSON.stringify(desc),
+          descriptionText: docToText(desc),
+          fields: JSON.stringify({ ...f, steps: sd.steps, testData: sd.testData, scriptInputs: sd.inputs }),
+        },
+      });
+    }
+  }
+
+  // Recorded attempts: one passed, one failed at step 3 (defect raised), one blocked, one in progress.
+  const attempt = async (runRef: string, tester: string, daysBack: number, inputs: Record<string, string>, results: [string, string, number[]?][], outcome: string | null) => {
+    const a = await db.testAttempt.create({
+      data: { workItemId: ID[runRef], number: 1, testerId: U[tester], inputs: JSON.stringify(inputs), startedAt: daysAgo(daysBack, 10), finishedAt: outcome ? daysAgo(daysBack, 11) : null, outcome },
+    });
+    for (const [i, [o, actual, raised]] of results.entries()) {
+      await db.testStepResult.create({ data: { attemptId: a.id, stepIndex: i, outcome: o, actual, raised: JSON.stringify(raised ?? []) } });
+    }
+  };
+  await attempt("tt-hire-perm", "maja", 16, { "Test user (HR admin)": "hradmin.test1", "New employee ID": "100231" }, [["Passed", ""], ["Passed", ""], ["Passed", "Routed to HR as expected"]], "Passed");
+  await attempt("tt-hire-temp", "maja", 12, { "Test user (HR admin)": "hradmin.test1" }, [["Passed", ""], ["Passed", ""], ["Failed", "Field is empty after save.", [ID["d-enddate"]]]], "Failed");
+  await attempt("tt-transfer", "nora", 12, { "Test user (HR admin)": "hradmin.test2", "Employee ID": "100118" }, [["Passed", ""], ["Passed", ""], ["Blocked", `Two active employments – blocked by #${ID["d-dup-employment"]}`]], "Blocked");
+  await attempt("tt-term-holiday", "lars", 5, { "Test user (payroll)": "payroll.test1", "Employee ID": "100077" }, [["Passed", ""], ["Failed", "Holiday pay line missing", [ID["d-holiday"]]]], "Failed");
+  await attempt("tt-rehire", "nora", 1, { "Test user (HR admin)": "hradmin.test2", "Rehired employee ID": "100045" }, [["Passed", ""]], null);
+
   // Links
   const link = (type: string, from: string, to: string) =>
     db.workItemLink.create({ data: { type, sourceId: ID[from], targetId: ID[to], createdById: U.erik } });
@@ -438,7 +544,7 @@ async function main() {
   });
 
   const count = await db.workItem.count();
-  console.log(`Seeded ${userDefs.length} users, ${count} work items, ${teamDefs.length} teams. Password for all demo users: demo1234`);
+  console.log(`Seeded ${userDefs.length} users, ${count} work items, ${teamDefs.length} teams, ${scriptDefs.length} test scripts. Password for all demo users: demo1234`);
 }
 
 main()
