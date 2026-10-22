@@ -15,6 +15,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except login, the public REST API (token auth), static assets and Next internals.
-  matcher: ["/((?!login|api/v1|api/docs|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except login, invite links, Microsoft sign-in, the public REST API (token auth), static assets and Next internals.
+  matcher: ["/((?!login|invite|auth/microsoft|api/v1|api/docs|_next/static|_next/image|favicon.ico).*)"],
 };

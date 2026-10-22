@@ -12,7 +12,10 @@ import { useToast } from "../ui/Toast";
 export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; onClear: () => void; onDone: () => void }) {
   const t = useT();
   const toast = useToast();
-  const { meta, typeById } = useProject();
+  const { meta, typeById, can } = useProject();
+  const canAssign = can("items.assign");
+  const canState = can("items.changeState") || can("items.close");
+  const canFields = can("items.edit");
   const [busy, setBusy] = useState(false);
   const [tag, setTag] = useState("");
 
@@ -64,7 +67,7 @@ export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; o
       <span className="text-sm font-semibold" aria-live="polite">
         {busy ? t("bulk.working", { count: selected.length }) : t("list.selected", { count: selected.length })}
       </span>
-      <select aria-label={t("bulk.assign")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ assignedToId: v === "__none" ? null : v }))}>
+      {canAssign && <select aria-label={t("bulk.assign")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ assignedToId: v === "__none" ? null : v }))}>
         <option value="">{t("bulk.assign")}</option>
         <option value="__none">{t("common.unassigned")}</option>
         {meta.users.map((u) => (
@@ -72,24 +75,24 @@ export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; o
             {u.name}
           </option>
         ))}
-      </select>
-      <select aria-label={t("bulk.state")} className={sel} disabled={busy || commonStates.length === 0} defaultValue="" onChange={pick((v) => apply({ state: v }))}>
+      </select>}
+      {canState && <select aria-label={t("bulk.state")} className={sel} disabled={busy || commonStates.length === 0} defaultValue="" onChange={pick((v) => apply({ state: v }))}>
         <option value="">{t("bulk.state")}</option>
         {commonStates.map((s) => (
           <option key={s} value={s}>
             {s}
           </option>
         ))}
-      </select>
-      <select aria-label={t("bulk.priority")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ priority: Number(v) }))}>
+      </select>}
+      {canFields && <select aria-label={t("bulk.priority")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ priority: Number(v) }))}>
         <option value="">{t("bulk.priority")}</option>
         {[1, 2, 3, 4].map((p) => (
           <option key={p} value={p}>
             {p}
           </option>
         ))}
-      </select>
-      <select aria-label={t("bulk.phase")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ phaseId: v === "__none" ? null : v }))}>
+      </select>}
+      {canFields && <select aria-label={t("bulk.phase")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ phaseId: v === "__none" ? null : v }))}>
         <option value="">{t("bulk.phase")}</option>
         <option value="__none">{t("common.none")}</option>
         {meta.phases.map((p) => (
@@ -97,8 +100,8 @@ export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; o
             {p.name}
           </option>
         ))}
-      </select>
-      <select aria-label={t("bulk.module")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ moduleId: v === "__none" ? null : v }))}>
+      </select>}
+      {canFields && <select aria-label={t("bulk.module")} className={sel} disabled={busy} defaultValue="" onChange={pick((v) => apply({ moduleId: v === "__none" ? null : v }))}>
         <option value="">{t("bulk.module")}</option>
         <option value="__none">{t("common.none")}</option>
         {meta.modules.map((m) => (
@@ -106,8 +109,8 @@ export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; o
             {m.path}
           </option>
         ))}
-      </select>
-      <form
+      </select>}
+      {canFields && <form
         className="flex items-center gap-1"
         onSubmit={(e) => {
           e.preventDefault();
@@ -118,7 +121,7 @@ export function BulkBar({ selected, onClear, onDone }: { selected: ItemView[]; o
         <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || !tag.trim()}>
           {t("common.add")}
         </button>
-      </form>
+      </form>}
       <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={onClear} disabled={busy}>
         {t("bulk.clear")}
       </button>

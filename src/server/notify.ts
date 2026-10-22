@@ -3,6 +3,8 @@ import { db } from "./db";
 import type { CurrentUser } from "./auth";
 import { appUrl, emailEnabled, sendMail } from "./email";
 import { buildNotificationEmail, type NotificationType } from "@/lib/email";
+import { can, canSeeItem, getAccess } from "./access";
+import type { Role } from "@/lib/types";
 
 interface Change {
   field: string;
@@ -10,11 +12,18 @@ interface Change {
   newValue: string | null;
 }
 
-async function send(userIds: Iterable<string>, type: NotificationType, workItemId: number, actor: CurrentUser, message: string) {
+async function send(userIds: Iterable<string>, type: NotificationType, workItemId: number, actor: CurrentUser, message: string, opts: { internal?: boolean } = {}) {
   const ids = [...new Set(userIds)].filter((id) => id !== actor.id);
   if (ids.length === 0) return;
-  // Only notify active users.
-  const users = await db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true, email: true, emailNotifications: true } });
+  const target = await db.workItem.findUnique({ where: { id: workItemId }, select: { projectId: true, moduleId: true } });
+  if (!target) return;
+  // Only notify active users who can see the item (and internal comments, when it is one).
+  const candidates = await db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true, email: true, emailNotifications: true, role: true } });
+  const users: typeof candidates = [];
+  for (const u of candidates) {
+    const a = await getAccess(u.id, u.role as Role, target.projectId);
+    if (canSeeItem(a, target) && (!opts.internal || can(a, "comments.internal"))) users.push(u);
+  }
   if (users.length === 0) return;
   await db.notification.createMany({ data: users.map((u) => ({ userId: u.id, type, workItemId, actorId: actor.id, message })) });
   if (!emailEnabled()) return;
@@ -86,7 +95,7 @@ export async function notifyBulkAssigned(actor: CurrentUser, byAssignee: Map<str
 }
 
 /** Called after a comment is created: mentions first, then followers. */
-export async function notifyComment(args: { itemId: number; actor: CurrentUser; mentionedUserIds: string[]; mentionedTeamIds: string[] }) {
+export async function notifyComment(args: { itemId: number; actor: CurrentUser; mentionedUserIds: string[]; mentionedTeamIds: string[]; internal?: boolean }) {
   const { itemId, actor } = args;
   const item = await db.workItem.findUnique({ where: { id: itemId }, select: { title: true } });
   if (!item) return;
@@ -94,8 +103,10 @@ export async function notifyComment(args: { itemId: number; actor: CurrentUser; 
     ? (await db.teamMember.findMany({ where: { teamId: { in: args.mentionedTeamIds } }, select: { userId: true } })).map((m) => m.userId)
     : [];
   const mentioned = new Set([...args.mentionedUserIds, ...teamMembers]);
-  await send(mentioned, "MENTIONED", itemId, actor, `${actor.name} mentioned you on #${itemId} ${item.title}`);
+  const internal = { internal: args.internal };
+  const note = args.internal ? " (internal)" : "";
+  await send(mentioned, "MENTIONED", itemId, actor, `${actor.name} mentioned you on #${itemId} ${item.title}${note}`, internal);
   const followers = (await followerIds(itemId)).filter((id) => !mentioned.has(id));
-  await send(followers, "COMMENTED", itemId, actor, `${actor.name} commented on #${itemId} ${item.title}`);
+  await send(followers, "COMMENTED", itemId, actor, `${actor.name} commented on #${itemId} ${item.title}${note}`, internal);
   await follow(actor.id, itemId);
 }

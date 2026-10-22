@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { db } from "@/server/db";
-import { requireUser } from "@/server/auth";
+import { projectPage } from "@/server/page-access";
+import { canSeeItem, toClientAccess } from "@/server/access";
 import { loadProjectMeta } from "@/server/projects";
+import { scopeMeta } from "@/server/projects";
 import { ProjectProvider } from "@/components/ProjectProvider";
 import { ItemPage } from "@/components/item/ItemPage";
 
@@ -16,15 +18,15 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
 
 export default async function WorkItemPage({ params }: { params: Promise<Params> }) {
   const { projectId, id } = await params;
-  await requireUser();
+  const { access } = await projectPage(projectId);
   const itemId = Number(id);
   if (!Number.isInteger(itemId)) notFound();
-  const item = await db.workItem.findUnique({ where: { id: itemId }, select: { projectId: true } });
-  if (!item || item.projectId !== projectId) notFound();
+  const item = await db.workItem.findUnique({ where: { id: itemId }, select: { projectId: true, moduleId: true } });
+  if (!item || item.projectId !== projectId || !canSeeItem(access, item)) notFound();
   const meta = await loadProjectMeta(projectId);
   if (!meta) notFound();
   return (
-    <ProjectProvider meta={meta}>
+    <ProjectProvider meta={scopeMeta(meta, access)} access={toClientAccess(access)}>
       <ItemPage itemId={itemId} />
     </ProjectProvider>
   );

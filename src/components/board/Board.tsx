@@ -84,8 +84,12 @@ function DroppableCell({ id, wip, children }: { id: string; wip: "none" | "ok" |
 
 export function Board(props: BoardProps) {
   const { t, locale } = useI18n();
-  const { meta, typeById, userById, moduleById, phaseById, queryContext } = useProject();
-  const { user, canEdit, canConfigure } = useSessionUser();
+  const { meta, typeById, userById, moduleById, phaseById, queryContext, can } = useProject();
+  const { user } = useSessionUser();
+  // Moving cards needs "change state"; creating and configuring have their own permissions.
+  const canEdit = can("items.changeState") || can("items.close");
+  const canCreate = can("items.create");
+  const canConfigure = can("boards.configure");
   const toast = useToast();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -331,7 +335,7 @@ export function Board(props: BoardProps) {
   useShortcuts({
     "/": () => searchRef.current?.focus(),
     n: () => {
-      if (!canEdit) return;
+      if (!canCreate) return;
       returnFocus.current = document.activeElement as HTMLElement;
       setOpenId(null);
       setNewDefaults({ moduleId: props.defaults.moduleId, phaseId: props.defaults.phaseId });
@@ -370,6 +374,7 @@ export function Board(props: BoardProps) {
           users={teamUsers}
           currentUserId={user.id}
           canEdit={canEdit}
+          canAssign={can("items.assign")}
           actions={actions}
           t={t}
           locale={locale}
@@ -402,7 +407,7 @@ export function Board(props: BoardProps) {
               </option>
             ))}
           </select>
-          {canEdit && (
+          {canCreate && (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -470,7 +475,7 @@ export function Board(props: BoardProps) {
                         {count}
                         {c.wipLimit ? `/${c.wipLimit}` : ""}
                       </span>
-                      {ci === 0 && canEdit && firstColumn && <QuickAdd teamDefaults={props.defaults} onCreated={refresh} />}
+                      {ci === 0 && canCreate && firstColumn && <QuickAdd teamDefaults={props.defaults} onCreated={refresh} />}
                     </div>
                     {hasSplit && c.split && (
                       <div className="mt-1 grid grid-cols-2 text-xs font-semibold text-ink-muted">

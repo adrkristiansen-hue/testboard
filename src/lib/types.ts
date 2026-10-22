@@ -127,3 +127,10 @@ export interface SavedQueryView {
   ownerName: string;
   updatedAt: string;
 }
+
+/** The current user's permissions in a project, as sent to the browser. */
+export interface ClientAccess {
+  permissions: import("./permissions").Permission[];
+  roleName: string | null;
+  isAdmin: boolean;
+}

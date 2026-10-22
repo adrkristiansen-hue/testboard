@@ -7,15 +7,13 @@ import { addLink, removeLink, searchItems } from "@/server/actions/items";
 import type { MessageKey } from "@/lib/i18n";
 import { useProject } from "../ProjectProvider";
 import { useT } from "../I18nProvider";
-import { useSessionUser } from "../SessionProvider";
 import { useToast } from "../ui/Toast";
 import { TypeIcon, StateDot } from "../ui/TypeIcon";
 import { Avatar } from "../ui/Avatar";
 
-export function Links({ itemId, links, onChanged, onOpenItem }: { itemId: number; links: LinkedItem[]; onChanged: () => void; onOpenItem?: (id: number) => void }) {
+export function Links({ itemId, links, onChanged, onOpenItem, canEdit }: { itemId: number; links: LinkedItem[]; onChanged: () => void; onOpenItem?: (id: number) => void; canEdit: boolean }) {
   const t = useT();
   const { meta, typeById, userById } = useProject();
-  const { canEdit } = useSessionUser();
   const toast = useToast();
   const [kind, setKind] = useState<LinkKind>("RELATED");
   const [target, setTarget] = useState("");

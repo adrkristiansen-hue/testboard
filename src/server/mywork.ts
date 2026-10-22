@@ -1,6 +1,8 @@
 import "server-only";
 import { db } from "./db";
 import { loadProjectMeta } from "./projects";
+import { can, canSeeItem, getAccess, type ProjectAccess } from "./access";
+import type { CurrentUser } from "./auth";
 import { isClosedCategory, type StateCategory } from "@/lib/workflow";
 import type { TypeLite } from "@/lib/types";
 
@@ -29,9 +31,9 @@ export interface MentionRow {
   viaTeam: string | null;
 }
 
-type ItemRow = { id: number; title: string; projectId: string; typeId: string; state: string; priority: number; dueDate: Date | null; changedAt: Date };
+type ItemRow = { id: number; title: string; projectId: string; moduleId: string | null; typeId: string; state: string; priority: number; dueDate: Date | null; changedAt: Date };
 
-const itemSelect = { id: true, title: true, projectId: true, typeId: true, state: true, priority: true, dueDate: true, changedAt: true } as const;
+const itemSelect = { id: true, title: true, projectId: true, moduleId: true, typeId: true, state: true, priority: true, dueDate: true, changedAt: true } as const;
 
 async function rowMapper(projectIds: Iterable<string>) {
   const metas = new Map<string, Awaited<ReturnType<typeof loadProjectMeta>>>();
@@ -57,22 +59,46 @@ async function rowMapper(projectIds: Iterable<string>) {
   };
 }
 
-export async function loadMyWork(userId: string, opts: { includeClosed: boolean }) {
-  const [assignedRaw, followRaw, teams] = await Promise.all([
+export async function loadMyWork(user: CurrentUser, opts: { includeClosed: boolean }) {
+  const userId = user.id;
+  const [assignedDb, followAll, teams] = await Promise.all([
     db.workItem.findMany({ where: { assignedToId: userId }, select: itemSelect, orderBy: [{ priority: "asc" }, { changedAt: "desc" }], take: 1000 }),
     db.follow.findMany({ where: { userId }, select: { workItem: { select: itemSelect } }, take: 1000 }),
     db.teamMember.findMany({ where: { userId }, select: { teamId: true } }),
   ]);
+  // Only items in projects the user can open and modules they may see (a user can lose access after being assigned).
+  const accessByProject = new Map<string, ProjectAccess>();
+  const visible = async (r: { projectId: string; moduleId: string | null }) => {
+    let a = accessByProject.get(r.projectId);
+    if (!a) {
+      a = await getAccess(user.id, user.role, r.projectId);
+      accessByProject.set(r.projectId, a);
+    }
+    return canSeeItem(a, r);
+  };
+  const keep = async <T,>(rows: T[], get: (r: T) => { projectId: string; moduleId: string | null }) => {
+    const out: T[] = [];
+    for (const r of rows) if (await visible(get(r))) out.push(r);
+    return out;
+  };
+  const assignedRaw = await keep(assignedDb, (r) => r);
+  const followRaw = await keep(followAll, (f) => f.workItem);
   const teamIds = teams.map((t) => t.teamId);
-  const mentionsRaw = await db.mention.findMany({
+  const mentionsAll = await db.mention.findMany({
     where: { OR: [{ userId }, ...(teamIds.length ? [{ teamId: { in: teamIds } }] : [])] },
     select: {
       team: { select: { name: true } },
-      comment: { select: { id: true, bodyText: true, createdAt: true, authorId: true, author: { select: { name: true, color: true } }, workItem: { select: itemSelect } } },
+      comment: { select: { id: true, bodyText: true, internal: true, createdAt: true, authorId: true, author: { select: { name: true, color: true } }, workItem: { select: itemSelect } } },
     },
     orderBy: { comment: { createdAt: "desc" } },
     take: 100,
   });
+  const mentionsRaw = [];
+  for (const m of mentionsAll) {
+    if (!(await visible(m.comment.workItem))) continue;
+    if (m.comment.internal && !can(accessByProject.get(m.comment.workItem.projectId)!, "comments.internal")) continue;
+    mentionsRaw.push(m);
+  }
 
   const toRow = await rowMapper([...assignedRaw.map((r) => r.projectId), ...followRaw.map((f) => f.workItem.projectId), ...mentionsRaw.map((m) => m.comment.workItem.projectId)]);
 

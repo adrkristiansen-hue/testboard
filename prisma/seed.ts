@@ -10,6 +10,7 @@ import { extractMentions, plainTextToMentionDoc } from "../src/lib/mentions";
 import { docToText, textToDoc } from "../src/lib/richtext";
 import type { SwimlaneConfig } from "../src/lib/swimlanes";
 import { templateFromProject } from "../src/server/template-build";
+import { DEFAULT_ROLES } from "../src/lib/permissions";
 
 const db = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: process.env.DATABASE_URL ?? "file:./dev.db" }) });
 
@@ -71,15 +72,27 @@ async function main() {
     { key: "maja", name: "Maja Sørli", email: "maja.sorli@demo.test", role: "MEMBER", color: "#be185d" },
     { key: "lars", name: "Lars Myrvold", email: "lars.myrvold@demo.test", role: "MEMBER", color: "#15803d" },
   ] as const;
+  // Organisations: the consultancy (internal) and the customer whose business testers take part.
+  const sariba = await db.organization.create({ data: { name: "Sariba", internal: true } });
+  const customer = await db.organization.create({ data: { name: "Fjordvik kommune (demo)" } });
+  const orgOf: Record<string, string> = { siri: sariba.id, erik: sariba.id, nora: sariba.id, jonas: sariba.id, maja: customer.id, lars: customer.id };
   const U: Record<string, string> = {};
   for (const u of userDefs) {
-    const row = await db.user.create({ data: { name: u.name, email: u.email, role: u.role, color: u.color, passwordHash } });
+    const row = await db.user.create({ data: { name: u.name, email: u.email, role: u.role, color: u.color, passwordHash, organizationId: orgOf[u.key] } });
     U[u.key] = row.id;
   }
 
   const project = await db.project.create({
     data: { key: "HRS", name: "HR system implementation", description: "Fictional SAP SuccessFactors implementation used as demo data." },
   });
+
+  // Project roles and members: Sariba staff as project lead / consultants, the customer's testers as customer testers.
+  const R: Record<string, string> = {};
+  for (const [i, r] of DEFAULT_ROLES.entries()) {
+    R[r.key] = (await db.projectRole.create({ data: { projectId: project.id, name: r.name, permissions: JSON.stringify(r.permissions), order: i } })).id;
+  }
+  const roleOf: Record<string, string> = { siri: "LEAD", erik: "LEAD", nora: "CONSULTANT", jonas: "CONSULTANT", maja: "CUSTOMER_TESTER", lars: "CUSTOMER_TESTER" };
+  for (const u of userDefs) await db.projectMember.create({ data: { projectId: project.id, userId: U[u.key], roleId: R[roleOf[u.key]] } });
 
   // Modules (Area Paths)
   const M: Record<string, string> = {};
@@ -135,7 +148,8 @@ async function main() {
   const teamDefs = [
     { key: "ec", name: "EC team", modules: ["ec", "care"], members: ["erik", "nora", "maja"], lanes: ecLanes },
     { key: "talent", name: "Talent team", modules: ["rec", "onb"], members: ["jonas", "maja", "erik"], lanes: { mode: "module" } as SwimlaneConfig },
-    { key: "payroll", name: "Payroll team", modules: ["ecp", "rep", "term"], members: ["lars", "nora", "erik"], lanes: { mode: "assignee" } as SwimlaneConfig },
+    // Payroll is locked: pay and termination cases are only visible to the board's members.
+    { key: "payroll", name: "Payroll team", modules: ["ecp", "rep", "term"], members: ["lars", "nora", "erik"], lanes: { mode: "assignee" } as SwimlaneConfig, restricted: true },
   ];
   const TEAM: Record<string, string> = {};
   for (const td of teamDefs) {
@@ -143,6 +157,7 @@ async function main() {
       data: {
         projectId: project.id,
         name: td.name,
+        restricted: "restricted" in td ? !!td.restricted : false,
         swimlanes: JSON.stringify(td.lanes),
         cardConfig: JSON.stringify(DEFAULT_CARD_CONFIG),
         members: { create: td.members.map((m) => ({ userId: U[m] })) },
@@ -333,11 +348,11 @@ async function main() {
   await link("RELATED", "cr-approval", "tt-promo");
 
   // Comments with @mentions and #ID references
-  const comment = async (ref: string, author: string, text: string, daysBack: number, reactions: [string, string][] = []) => {
+  const comment = async (ref: string, author: string, text: string, daysBack: number, reactions: [string, string][] = [], internal = false) => {
     const doc = plainTextToMentionDoc(text, { ...directory, itemExists: (id) => Object.values(ID).includes(id) });
     const m = extractMentions(doc);
     const c = await db.comment.create({
-      data: { workItemId: ID[ref], authorId: U[author], body: JSON.stringify(doc), bodyText: docToText(doc), createdAt: daysAgo(daysBack, 13) },
+      data: { workItemId: ID[ref], authorId: U[author], body: JSON.stringify(doc), bodyText: docToText(doc), createdAt: daysAgo(daysBack, 13), internal },
     });
     for (const uid of m.userIds) {
       await db.mention.create({ data: { commentId: c.id, userId: uid } });
@@ -354,6 +369,7 @@ async function main() {
   await comment("d-enddate", "maja", "Thanks! Can we get it into the next transport? @[Erik Brattland]", 10);
   await comment("d-dup-employment", "nora", `This blocks #${ID["tt-transfer"]}. @[EC team] please do not run any legal entity transfers until fixed.`, 13, [["erik", "👀"], ["maja", "👍"]]);
   await comment("d-dup-employment", "erik", "Raised with the SAP partner as priority 1. Target fix in transport 14.", 10);
+  await comment("d-dup-employment", "nora", "Internal: root cause is our position-sync job config, not SAP. Fix ourselves before telling the customer the date.", 9, [], true);
   await comment("d-dup-employment", "siri", "@[Erik Brattland] the due date has passed – any update from the partner?", 1);
   await comment("d-holiday", "lars", `Found while running #${ID["tt-term-holiday"]}. See also question #${ID["q-holiday"]}.`, 5);
   await comment("q-holiday", "lars", "@[Siri Holmvik] can you confirm with HR which reasons should pay out holiday pay?", 4);

@@ -15,6 +15,8 @@ export interface CommentView {
   body: RtDoc;
   createdAt: string;
   editedAt: string | null;
+  /** Internal note, only shown to users allowed to see internal comments */
+  internal: boolean;
   reactions: { emoji: string; userIds: string[] }[];
 }
 

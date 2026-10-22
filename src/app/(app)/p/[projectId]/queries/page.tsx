@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser } from "@/server/auth";
+import { projectPage } from "@/server/page-access";
 import { getT } from "@/server/locale";
 import { loadProjectMeta } from "@/server/projects";
 import { loadQueries } from "@/server/queries";
@@ -11,7 +11,7 @@ export const metadata = { title: "Queries" };
 
 export default async function QueriesPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const user = await requireUser();
+  const { user } = await projectPage(projectId);
   const meta = await loadProjectMeta(projectId);
   if (!meta) notFound();
   const { t, locale } = await getT();

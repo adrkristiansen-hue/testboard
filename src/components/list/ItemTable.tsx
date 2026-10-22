@@ -43,8 +43,12 @@ const VIRTUAL_ROWS_FROM = 150;
 
 export function ItemTable(props: ItemTableProps) {
   const { t, locale } = useI18n();
-  const { typeById, queryContext } = useProject();
-  const { user, canEdit } = useSessionUser();
+  const { typeById, queryContext, can } = useProject();
+  const { user } = useSessionUser();
+  const canEdit = can("items.edit") || can("items.assign") || can("items.changeState");
+  // Which inline edits the role allows (own items count for "edit own"; the server checks again).
+  const editAllowed = (kind: NonNullable<ColumnDef["edit"]>, it: ItemView) =>
+    kind === "state" ? can("items.changeState") || can("items.close") : kind === "assignedTo" ? can("items.assign") : can("items.edit") || (it.createdById === user.id && can("items.editOwn"));
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [editing, setEditing] = useState<{ id: number; key: string } | null>(null);
   const qctx = useMemo(() => queryContext(user.id), [queryContext, user.id]);
@@ -132,7 +136,7 @@ export function ItemTable(props: ItemTableProps) {
               )}
               {props.columns.map((c) => {
                 const isEditing = editing?.id === it.id && editing.key === c.key;
-                const editable = canEdit && !!c.edit && !(c.edit === "severity" && typeById.get(it.typeId)?.key !== "DEFECT");
+                const editable = !!c.edit && editAllowed(c.edit, it) && !(c.edit === "severity" && typeById.get(it.typeId)?.key !== "DEFECT");
                 if (isEditing && c.edit) {
                   return (
                     <td key={c.key} className="px-1 py-0.5">

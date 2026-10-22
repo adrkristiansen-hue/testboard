@@ -36,6 +36,8 @@ export interface CardProps {
   users: UserLite[];
   currentUserId: string;
   canEdit: boolean;
+  /** May reassign from the card's avatar menu */
+  canAssign: boolean;
   actions: CardActions;
   t: TFunction;
   locale: Locale;
@@ -153,7 +155,7 @@ function CardInner(p: CardProps) {
           ))}
         {has("assignee") && (
           <span className="relative z-10 ml-auto">
-            {p.canEdit ? (
+            {p.canAssign ? (
               <Popover
                 label={`${t("board.assign")}: ${p.assignee?.name ?? t("common.unassigned")}`}
                 trigger={<Avatar user={p.assignee} size={22} />}

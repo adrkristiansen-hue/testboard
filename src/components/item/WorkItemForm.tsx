@@ -109,8 +109,8 @@ function same(a: unknown, b: unknown) {
 export function WorkItemForm(props: WorkItemFormProps) {
   const { itemId, variant } = props;
   const { t, locale } = useI18n();
-  const { meta, typeById, userById } = useProject();
-  const { user, canEdit, canConfigure } = useSessionUser();
+  const { meta, typeById, userById, can } = useProject();
+  const { user } = useSessionUser();
   const toast = useToast();
   const router = useRouter();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
@@ -127,6 +127,15 @@ export function WorkItemForm(props: WorkItemFormProps) {
   const rootRef = useRef<HTMLDivElement>(null);
 
   const isNew = itemId === null;
+  // What the user's project role allows on this item (the server checks again on save).
+  const own = isNew || detail?.item.createdById === user.id;
+  const canFields = isNew ? can("items.create") : can("items.edit") || (own && can("items.editOwn"));
+  const canState = isNew ? can("items.create") : can("items.changeState") || can("items.close");
+  const canAssign = can("items.assign");
+  const canTake = can("items.assign") || can("items.changeState");
+  const canEdit = canFields || canState || canTake;
+  const canDelete = can("items.delete");
+  const canCreate = can("items.create");
 
   const applyDetail = useCallback(
     (res: Awaited<ReturnType<typeof getItemDetail>>, resetDraft: boolean) => {
@@ -179,12 +188,15 @@ export function WorkItemForm(props: WorkItemFormProps) {
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => (d ? { ...d, [key]: value } : d));
   const setField = (key: string, value: unknown) => setDraft((d) => (d ? { ...d, fields: { ...d.fields, [key]: value } } : d));
 
+  const canClose = can("items.close");
   const stateOptions = useMemo(() => {
     if (!type || !draft) return [];
     if (isNew) return type.states.map((s) => s.name);
     const current = base?.state ?? draft.state;
-    return [current, ...allowedTargets({ states: type.states, transitions: type.transitions }, current)];
-  }, [type, draft, base, isNew]);
+    const closing = (name: string) => ["COMPLETED", "REMOVED"].includes(type.states.find((s) => s.name === name)?.category ?? "");
+    // Without "close" rights, closed/removed states are not offered.
+    return [current, ...allowedTargets({ states: type.states, transitions: type.transitions }, current).filter((s) => canClose || !closing(s))];
+  }, [type, draft, base, isNew, canClose]);
 
   const save = () => {
     if (!draft || !canEdit) return;
@@ -320,7 +332,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
   }
   if (!draft) return <div className="p-6 text-ink-muted">{t("common.loading")}</div>;
 
-  const ro = !canEdit;
+  const ro = !canFields;
   const stateDef = type?.states.find((s) => s.name === draft.state);
   const fieldLabel = (f: FieldDef) => (locale === "nb" && f.labelNb ? f.labelNb : f.label);
   const tabs: { key: Tab; label: string; count?: number }[] = [
@@ -358,7 +370,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
             </span>
           )}
           <div className="ml-auto flex items-center gap-1 normal-case">
-            {!isNew && detail && type?.key === "TEST_TASK" && canEdit && detail.item.fields.outcome === "Failed" && (
+            {!isNew && detail && type?.key === "TEST_TASK" && canCreate && detail.item.fields.outcome === "Failed" && (
               <button type="button" className="btn btn-sm btn-danger" onClick={createDefect}>
                 + {t("item.defectFromFailure")}
               </button>
@@ -385,10 +397,10 @@ export function WorkItemForm(props: WorkItemFormProps) {
                     >
                       {t("item.copyLink")}
                     </MenuItem>
-                    {type?.key === "TEST_TASK" && canEdit && (
+                    {type?.key === "TEST_TASK" && canCreate && (
                       <MenuItem onClick={() => { close(); createDefect(); }}>{t("item.createDefect")}</MenuItem>
                     )}
-                    {canConfigure && (
+                    {canDelete && (
                       <MenuItem onClick={() => { close(); void onDelete(); }}>
                         <span className="text-danger">{t("common.delete")}</span>
                       </MenuItem>
@@ -429,7 +441,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
             </label>
             <div className="flex items-center gap-1.5">
               <StateDot color={stateDef?.color ?? "#999"} />
-              <select id={`${idp}-state`} className="input" value={draft.state} disabled={ro} onChange={(e) => set("state", e.target.value)}>
+              <select id={`${idp}-state`} className="input" value={draft.state} disabled={!canState} onChange={(e) => set("state", e.target.value)}>
                 {stateOptions.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -442,9 +454,9 @@ export function WorkItemForm(props: WorkItemFormProps) {
             <label htmlFor={`${idp}-assignee`} className="label">
               {t("field.assignedTo")}
             </label>
-            <UserSelect id={`${idp}-assignee`} users={meta.users} value={draft.assignedToId} onChange={(v) => set("assignedToId", v)} disabled={ro} unassignedLabel={t("common.unassigned")} />
+            <UserSelect id={`${idp}-assignee`} users={meta.users} value={draft.assignedToId} onChange={(v) => set("assignedToId", v)} disabled={!canAssign} unassignedLabel={t("common.unassigned")} />
           </div>
-          {canEdit && draft.assignedToId !== user.id && (
+          {canTake && draft.assignedToId !== user.id && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => set("assignedToId", user.id)}>
               {t("board.assignToMe")}
             </button>
@@ -458,7 +470,7 @@ export function WorkItemForm(props: WorkItemFormProps) {
             )}
           </div>
         </div>
-        {ro && <p className="mt-1 text-xs text-ink-muted">{t("common.readOnly")}</p>}
+        {ro && <p className="mt-1 text-xs text-ink-muted">{canEdit ? t("item.partialEdit") : t("common.readOnly")}</p>}
         {error && (
           <p role="alert" className="mt-2 rounded bg-red-50 px-2 py-1 text-sm text-danger">
             {error}
@@ -623,12 +635,12 @@ export function WorkItemForm(props: WorkItemFormProps) {
         )}
         {tab === "links" && detail && (
           <div className="p-4">
-            <Links itemId={itemId!} links={detail.links} onChanged={refreshAfterSideEffect} onOpenItem={props.onOpenItem} />
+            <Links itemId={itemId!} links={detail.links} onChanged={refreshAfterSideEffect} onOpenItem={props.onOpenItem} canEdit={canFields} />
           </div>
         )}
         {tab === "attachments" && detail && (
           <div className="p-4">
-            <Attachments itemId={itemId!} attachments={detail.attachments} onChanged={refreshAfterSideEffect} />
+            <Attachments itemId={itemId!} attachments={detail.attachments} onChanged={refreshAfterSideEffect} canEdit={canFields} />
           </div>
         )}
       </div>

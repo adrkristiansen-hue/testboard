@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { getCurrentUser } from "@/server/auth";
 import { getT } from "@/server/locale";
-import { loadItems, loadProjectMeta } from "@/server/projects";
+import { loadVisibleItems, loadProjectMeta } from "@/server/projects";
+import { accessFor, can, canView } from "@/server/access";
 import { toCsv, toXlsx } from "@/server/export";
 import { columnCatalogue, columnNames, exportFileName, resolveColumns } from "@/lib/columns";
 
@@ -24,8 +25,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   const meta = await loadProjectMeta(projectId);
   if (!meta) return new Response("Not found", { status: 404 });
+  const access = await accessFor(user, projectId);
+  if (!canView(access)) return new Response("Not found", { status: 404 });
+  if (!can(access, "items.export")) return new Response("Your role does not allow export", { status: 403 });
   const { t, locale } = await getT();
-  const rows = await loadItems(meta, { id: { in: ids } });
+  const rows = await loadVisibleItems(access, meta, { id: { in: ids } });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const items = ids.map((id) => byId.get(id)).filter((r) => !!r);
   const cols = resolveColumns(columns, columnCatalogue(meta));

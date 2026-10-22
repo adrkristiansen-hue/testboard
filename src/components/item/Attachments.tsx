@@ -10,10 +10,11 @@ import { useToast } from "../ui/Toast";
 import { formatBytes, uploadFile } from "./upload";
 import { formatDateTime } from "@/lib/format";
 
-export function Attachments({ itemId, attachments, onChanged }: { itemId: number; attachments: AttachmentView[]; onChanged: () => void }) {
+export function Attachments({ itemId, attachments, onChanged, canEdit }: { itemId: number; attachments: AttachmentView[]; onChanged: () => void; canEdit: boolean }) {
   const { t, locale } = useI18n();
   const { userById } = useProject();
-  const { user, canEdit } = useSessionUser();
+  const { user } = useSessionUser();
+  const canEditAll = useProject().can("items.edit");
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -94,7 +95,7 @@ export function Attachments({ itemId, attachments, onChanged }: { itemId: number
                   {a.commentId && " · 💬"}
                 </div>
               </div>
-              {canEdit && (a.uploadedById === user.id || user.role !== "MEMBER") && (
+              {canEdit && (a.uploadedById === user.id || canEditAll) && (
                 <button type="button" className="icon-btn" aria-label={`${t("common.delete")} ${a.fileName}`} onClick={() => remove(a.id)}>
                   🗑
                 </button>

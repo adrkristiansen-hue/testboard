@@ -5,6 +5,7 @@ import type { ItemView, ModuleLite, ProjectMeta, Role, TypeLite } from "@/lib/ty
 import { parseFieldDefs, parseJsonObject, parseStringArray } from "@/lib/fields";
 import { isClosedCategory, type StateCategory } from "@/lib/workflow";
 import { buildModuleSubtree } from "@/lib/query";
+import { ensureProjectDefaults, visibleItemsWhere, type ProjectAccess } from "./access";
 import type { Prisma } from "@/generated/prisma/client";
 
 export function modulePaths<T extends { id: string; name: string; parentId: string | null; order: number }>(mods: T[]): (T & { path: string })[] {
@@ -48,7 +49,9 @@ export const loadProjectMeta = cache(async (projectId: string): Promise<ProjectM
     },
   });
   if (!project) return null;
-  const users = await db.user.findMany({ where: { active: true }, orderBy: { name: "asc" } });
+  // People who can be assigned or mentioned: active members of this project only.
+  await ensureProjectDefaults(projectId);
+  const users = await db.user.findMany({ where: { active: true, memberships: { some: { projectId } } }, orderBy: { name: "asc" } });
   const modules: ModuleLite[] = modulePaths(project.modules).map((m) => ({ id: m.id, name: m.name, parentId: m.parentId, order: m.order, path: m.path }));
   const types: TypeLite[] = project.types.map((t) => ({
     id: t.id,
@@ -126,6 +129,11 @@ export async function loadItems(meta: ProjectMeta, where: Prisma.WorkItemWhereIn
   return rows.map((r) => toItemView(r, types));
 }
 
+/** Work items the user may see (items in locked boards' modules are left out). */
+export function loadVisibleItems(access: ProjectAccess, meta: ProjectMeta, where: Prisma.WorkItemWhereInput = {}): Promise<ItemView[]> {
+  return loadItems(meta, { AND: [where, visibleItemsWhere(access)] });
+}
+
 /** Module ids visible on a team's board (subscribed modules, optionally with their sub-modules). */
 export async function teamModuleIds(teamId: string, meta: ProjectMeta): Promise<Set<string>> {
   const subs = await db.teamModule.findMany({ where: { teamId } });
@@ -136,4 +144,9 @@ export async function teamModuleIds(teamId: string, meta: ProjectMeta): Promise<
     else ids.add(s.moduleId);
   }
   return ids;
+}
+
+/** Project metadata as one user may see it: locked boards they are not on are left out. */
+export function scopeMeta(meta: ProjectMeta, access: ProjectAccess): ProjectMeta {
+  return access.hiddenBoards.size ? { ...meta, teams: meta.teams.filter((t) => !access.hiddenBoards.has(t.id)) } : meta;
 }

@@ -14,8 +14,11 @@ import { useProject } from "../ProjectProvider";
 import { useT } from "../I18nProvider";
 import { useToast } from "../ui/Toast";
 import { TypeIcon } from "../ui/TypeIcon";
+import { AccessSettings } from "./AccessSettings";
+import type { AccessData } from "@/server/access-admin";
+import type { Permission } from "@/lib/permissions";
 
-type Tab = "general" | "modules" | "phases" | "teams" | "types";
+type Tab = "general" | "modules" | "phases" | "teams" | "types" | "access";
 
 interface TeamCfg {
   id: string;
@@ -40,17 +43,19 @@ function useAction() {
   return { pending, exec };
 }
 
-export function ProjectSettings({ description, teams, typeUsage }: { description: string; teams: TeamCfg[]; typeUsage: Record<string, number> }) {
+export function ProjectSettings({ description, teams, typeUsage, accessData }: { description: string; teams: TeamCfg[]; typeUsage: Record<string, number>; accessData: AccessData | null }) {
   const t = useT();
-  const { meta } = useProject();
-  const [tab, setTab] = useState<Tab>("modules");
-  const tabs: { key: Tab; label: MessageKey }[] = [
-    { key: "general", label: "settings.general" },
-    { key: "modules", label: "settings.modules" },
-    { key: "phases", label: "settings.phases" },
-    { key: "teams", label: "settings.teams" },
-    { key: "types", label: "settings.types" },
-  ];
+  const { meta, can } = useProject();
+  // Only the tabs the user's project role may change.
+  const tabs = ([
+    { key: "general", label: "settings.general", need: "project.configure" },
+    { key: "modules", label: "settings.modules", need: "project.configure" },
+    { key: "phases", label: "settings.phases", need: "project.configure" },
+    { key: "teams", label: "settings.teams", need: "boards.configure" },
+    { key: "types", label: "settings.types", need: "project.configure" },
+    { key: "access", label: "settings.access", need: "access.manage" },
+  ] as { key: Tab; label: MessageKey; need: Permission }[]).filter((x) => can(x.need) && (x.key !== "access" || accessData));
+  const [tab, setTab] = useState<Tab>(tabs.find((x) => x.key === "modules")?.key ?? tabs[0]?.key ?? "modules");
   return (
     <main className="mx-auto w-full max-w-5xl p-4">
       <h1 className="mb-3 text-lg font-semibold">
@@ -68,6 +73,7 @@ export function ProjectSettings({ description, teams, typeUsage }: { description
       {tab === "phases" && <Phases />}
       {tab === "teams" && <Teams teams={teams} />}
       {tab === "types" && <Types usage={typeUsage} />}
+      {tab === "access" && accessData && <AccessSettings data={accessData} />}
     </main>
   );
 }

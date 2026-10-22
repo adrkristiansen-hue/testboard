@@ -24,8 +24,9 @@ export function QueryEditor({ query, isNew, items }: { query: SavedQueryView; is
   const toast = useToast();
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const { meta, queryContext } = useProject();
-  const { user, canConfigure } = useSessionUser();
+  const { meta, queryContext, can } = useProject();
+  const { user } = useSessionUser();
+  const canConfigure = can("queries.share");
 
   const [name, setName] = useState(query.name);
   const [shared, setShared] = useState(query.shared);

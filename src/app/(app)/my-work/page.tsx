@@ -66,7 +66,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   const tab: Tab = sp.tab === "mentioned" || sp.tab === "following" ? sp.tab : "assigned";
   const includeClosed = sp.closed === "1";
   const { t, locale } = await getT();
-  const data = await loadMyWork(user.id, { includeClosed });
+  const data = await loadMyWork(user, { includeClosed });
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
 

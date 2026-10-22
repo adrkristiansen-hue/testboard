@@ -26,6 +26,9 @@ model User {
   active       Boolean  @default(true)
   /// Receive notification emails (only used when EMAIL_NOTIFICATIONS_ENABLED=true)
   emailNotifications Boolean @default(true)
+  organizationId String?
+  /// Sign-in method last used: PASSWORD | MICROSOFT
+  authProvider String  @default("PASSWORD")
   createdAt    DateTime @default(now())
 
   teams            TeamMember[]
@@ -44,6 +47,32 @@ model User {
   savedQueries     SavedQuery[]
   apiTokens        ApiToken[]
   auditEntries     AuditLog[]
+  organization     Organization?   @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  memberships      ProjectMember[]
+  invites          Invite[]        @relation("InviteUser")
+  invitesSent      Invite[]        @relation("InviteCreatedBy")
+}
+
+/// The company a user belongs to: Sariba (internal) or a customer.
+model Organization {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  /// Internal organisation (the consultancy itself)
+  internal Boolean @default(false)
+  users    User[]
+}
+
+/// One-time link for a new user to set a password.
+model Invite {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  user        User      @relation("InviteUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User?     @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 }
 
 model ApiToken {
@@ -76,6 +105,32 @@ model AuditLog {
 // Project structure: Project, Module (Area Path), Phase (Iteration Path), Team
 // ---------------------------------------------------------------------------
 
+/// A named set of permissions inside one project (e.g. Project lead, Consultant, Customer tester).
+model ProjectRole {
+  id          String  @id @default(cuid())
+  projectId   String
+  name        String
+  /// Permission keys JSON string[] (see src/lib/permissions.ts)
+  permissions String  @default("[]")
+  order       Int     @default(0)
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members     ProjectMember[]
+
+  @@unique([projectId, name])
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  roleId    String
+  createdAt DateTime    @default(now())
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([projectId, userId])
+}
+
 model Project {
   id          String   @id @default(cuid())
   key         String   @unique
@@ -89,6 +144,8 @@ model Project {
   types        WorkItemType[]
   workItems    WorkItem[]
   savedQueries SavedQuery[]
+  roles        ProjectRole[]
+  members      ProjectMember[]
 }
 
 model Module {
@@ -129,6 +186,8 @@ model Team {
   swimlanes String @default("{\"mode\":\"none\"}")
   /// CardConfig JSON (see src/lib/cards.ts)
   cardConfig String @default("{}")
+  /// Locked board: work items in its modules are only visible to its members
+  restricted Boolean @default(false)
 
   project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   members  TeamMember[]
@@ -304,6 +363,8 @@ model Comment {
   /// Tiptap JSON
   body       String
   bodyText   String    @default("")
+  /// Internal note: only visible to users with the "comments.internal" permission
+  internal   Boolean   @default(false)
   createdAt  DateTime  @default(now())
   editedAt   DateTime?
 

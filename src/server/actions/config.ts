@@ -3,7 +3,8 @@
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { db } from "../db";
-import { requireAdmin, requireConfigurer } from "../auth";
+import { ForbiddenError, requireAdmin, requireConfigurer, requireEditor } from "../auth";
+import { createDefaultRoles, requirePermission } from "../access";
 import { run, type ActionResult } from "../result";
 import { UserError } from "../workitems";
 import { audit } from "../audit";
@@ -14,6 +15,37 @@ import { validateColumns } from "@/lib/board";
 import { ROLES } from "@/lib/types";
 import { loadProjectMeta } from "../projects";
 import { createProjectFromTemplate, parseTemplateContent, templateFromProject } from "../template-build";
+
+// ---------------------------------------------------------------------------
+// Permission helpers
+// ---------------------------------------------------------------------------
+
+async function projectConfigurer(projectId: string) {
+  const user = await requireEditor();
+  await requirePermission(user, projectId, "project.configure");
+  return user;
+}
+
+async function moduleProject(id: string) {
+  const m = await db.module.findUnique({ where: { id }, select: { projectId: true } });
+  if (!m) throw new UserError("Module not found.");
+  return m.projectId;
+}
+
+async function boardConfigurer(teamId: string) {
+  const user = await requireEditor();
+  const team = await db.team.findUnique({ where: { id: teamId }, include: { members: { select: { userId: true } } } });
+  if (!team) throw new UserError("Board not found.");
+  const access = await requirePermission(user, team.projectId, "boards.configure");
+  if (access.hiddenBoards.has(team.id)) throw new UserError("Board not found.");
+  return { user, team, access };
+}
+
+/** New projects get the default roles, with the creator as project lead. */
+async function addCreatorAsLead(projectId: string, userId: string) {
+  const roles = await createDefaultRoles(projectId);
+  await db.projectMember.upsert({ where: { projectId_userId: { projectId, userId } }, create: { projectId, userId, roleId: roles.get("LEAD")! }, update: {} });
+}
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -36,10 +68,12 @@ export async function createProject(input: z.infer<typeof projectSchema> & { tem
       const tpl = await db.processTemplate.findUnique({ where: { id: templateId } });
       if (!tpl) throw new UserError("Template not found.");
       const id = await createProjectFromTemplate(db, data, parseTemplateContent(tpl.content), user.id);
+      await addCreatorAsLead(id, user.id);
       await audit(user.id, "project.create", "Project", id, { ...data, template: tpl.name });
       return { id };
     }
     const project = await db.project.create({ data });
+    await addCreatorAsLead(project.id, user.id);
     const typeIds = new Map<string, string>();
     for (const [i, t] of DEFAULT_TYPES.entries()) {
       const row = await db.workItemType.create({
@@ -73,7 +107,7 @@ export async function createProject(input: z.infer<typeof projectSchema> & { tem
 
 export async function updateProject(id: string, input: { name: string; description?: string }): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(id);
     const data = projectSchema.pick({ name: true, description: true }).parse(input);
     await db.project.update({ where: { id }, data });
     await audit(user.id, "project.update", "Project", id, data);
@@ -87,7 +121,7 @@ export async function updateProject(id: string, input: { name: string; descripti
 
 export async function saveModule(projectId: string, input: { id?: string; name: string; parentId: string | null }): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(projectId);
     const name = z.string().trim().min(1).max(100).parse(input.name);
     if (input.parentId) {
       const parent = await db.module.findFirst({ where: { id: input.parentId, projectId } });
@@ -112,7 +146,7 @@ export async function saveModule(projectId: string, input: { id?: string; name: 
 
 export async function moveModule(id: string, direction: -1 | 1): Promise<ActionResult> {
   return run(async () => {
-    await requireConfigurer();
+    await projectConfigurer(await moduleProject(id));
     const m = await db.module.findUnique({ where: { id } });
     if (!m) throw new UserError("Module not found.");
     const siblings = await db.module.findMany({ where: { projectId: m.projectId, parentId: m.parentId }, orderBy: [{ order: "asc" }, { name: "asc" }] });
@@ -127,7 +161,7 @@ export async function moveModule(id: string, direction: -1 | 1): Promise<ActionR
 
 export async function deleteModule(id: string): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(await moduleProject(id));
     const inUse = await db.workItem.count({ where: { moduleId: id } });
     const children = await db.module.count({ where: { parentId: id } });
     if (children) throw new UserError("Delete or move the sub-modules first.");
@@ -151,7 +185,7 @@ const phaseSchema = z.object({
 
 export async function savePhase(projectId: string, input: z.infer<typeof phaseSchema>): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(projectId);
     const p = phaseSchema.parse(input);
     const start = p.startDate ? new Date(p.startDate) : null;
     const end = p.endDate ? new Date(p.endDate) : null;
@@ -168,7 +202,9 @@ export async function savePhase(projectId: string, input: z.infer<typeof phaseSc
 
 export async function deletePhase(id: string): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const phase = await db.phase.findUnique({ where: { id }, select: { projectId: true } });
+    if (!phase) throw new UserError("Phase not found.");
+    const user = await projectConfigurer(phase.projectId);
     const inUse = await db.workItem.count({ where: { phaseId: id } });
     if (inUse) throw new UserError(`${inUse} work item(s) use this phase. Move them first.`);
     await db.phase.delete({ where: { id } });
@@ -188,15 +224,28 @@ const teamSchema = z.object({
   modules: z.array(z.object({ moduleId: z.string(), includeChildren: z.boolean() })),
   /** New boards only: copy columns, swimlanes and card settings from this board */
   copyFromTeamId: z.string().optional(),
+  /** Locked board: items in its modules are only visible to its members */
+  restricted: z.boolean().optional(),
 });
 
 export async function saveTeam(projectId: string, input: z.infer<typeof teamSchema>): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await requireEditor();
     const t = teamSchema.parse(input);
+    const access = await requirePermission(user, projectId, "boards.configure");
+    const existing = t.id ? await db.team.findFirst({ where: { id: t.id, projectId }, include: { members: { select: { userId: true } } } }) : null;
+    if (t.id && (!existing || access.hiddenBoards.has(t.id))) throw new UserError("Board not found.");
+    // Locking a board, or changing who is on a locked board, decides who sees work: that is access management.
+    const restricted = t.restricted ?? existing?.restricted ?? false;
+    const membersChanged = !existing || [...new Set(t.memberIds)].sort().join() !== existing.members.map((m) => m.userId).sort().join();
+    if ((restricted !== (existing?.restricted ?? false) || (restricted && membersChanged)) && !access.permissions.has("access.manage")) {
+      throw new ForbiddenError("Only people who manage access can lock boards or change who is on a locked board.");
+    }
+    const members = await db.projectMember.findMany({ where: { projectId, userId: { in: t.memberIds } }, select: { userId: true } });
+    t.memberIds = members.map((m) => m.userId);
     let id = t.id;
     if (id) {
-      await db.team.update({ where: { id }, data: { name: t.name } });
+      await db.team.update({ where: { id }, data: { name: t.name, restricted } });
       await db.teamMember.deleteMany({ where: { teamId: id } });
       await db.teamModule.deleteMany({ where: { teamId: id } });
     } else {
@@ -210,6 +259,7 @@ export async function saveTeam(projectId: string, input: z.infer<typeof teamSche
             data: {
               projectId,
               name: t.name,
+              restricted,
               swimlanes: source.swimlanes,
               cardConfig: source.cardConfig,
               columns: { create: source.columns.map((c) => ({ name: c.name, order: c.order, wipLimit: c.wipLimit, split: c.split, stateMap: c.stateMap })) },
@@ -219,6 +269,7 @@ export async function saveTeam(projectId: string, input: z.infer<typeof teamSche
         data: {
           projectId,
           name: t.name,
+          restricted,
           cardConfig: JSON.stringify(DEFAULT_CARD_CONFIG),
           columns: { create: DEFAULT_COLUMNS.map((c, i) => ({ name: c.name, order: i, wipLimit: c.wipLimit, split: c.split, stateMap: JSON.stringify(columnStateMap(c, typeIds)) })) },
         },
@@ -234,7 +285,7 @@ export async function saveTeam(projectId: string, input: z.infer<typeof teamSche
 
 export async function deleteTeam(id: string): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const { user } = await boardConfigurer(id);
     await db.team.delete({ where: { id } });
     await audit(user.id, "team.delete", "Team", id);
     return undefined;
@@ -269,7 +320,7 @@ const typeSchema = z.object({
 
 export async function saveType(projectId: string, input: z.infer<typeof typeSchema>): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(projectId);
     const t = typeSchema.parse(input);
     const problems = validateWorkflow({ states: t.states.map((s, i) => ({ ...s, category: s.category as StateCategory, order: i })), transitions: t.transitions });
     const keys = new Set<string>();
@@ -347,7 +398,7 @@ const columnsSchema = z.array(
 
 export async function saveColumns(teamId: string, input: z.infer<typeof columnsSchema>): Promise<ActionResult<{ warnings: string[] }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const { user } = await boardConfigurer(teamId);
     const cols = columnsSchema.parse(input);
     const team = await db.team.findUnique({ where: { id: teamId } });
     if (!team) throw new UserError("Team not found.");
@@ -386,7 +437,7 @@ const swimlaneSchema = z.object({
 
 export async function saveSwimlanes(teamId: string, input: z.infer<typeof swimlaneSchema>): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const { user } = await boardConfigurer(teamId);
     const cfg = swimlaneSchema.parse(input);
     await db.team.update({ where: { id: teamId }, data: { swimlanes: JSON.stringify(cfg) } });
     await audit(user.id, "board.swimlanes", "Team", teamId, cfg.mode);
@@ -410,7 +461,7 @@ const cardConfigSchema = z.object({
 
 export async function saveCardConfig(teamId: string, input: z.infer<typeof cardConfigSchema>): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const { user } = await boardConfigurer(teamId);
     const cfg = cardConfigSchema.parse(input);
     await db.team.update({ where: { id: teamId }, data: { cardConfig: JSON.stringify(cfg) } });
     await audit(user.id, "board.cards", "Team", teamId);
@@ -457,7 +508,7 @@ export async function saveUser(input: z.infer<typeof userSchema>): Promise<Actio
 
 export async function saveProjectAsTemplate(projectId: string, input: { name: string; description?: string }): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await projectConfigurer(projectId);
     const d = z.object({ name: z.string().trim().min(1).max(100), description: z.string().max(1000).optional() }).parse(input);
     const content = await templateFromProject(db, projectId);
     const row = await db.processTemplate.create({ data: { name: d.name, description: d.description || null, content: JSON.stringify(content) } });

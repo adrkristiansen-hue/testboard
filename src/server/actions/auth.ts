@@ -7,6 +7,7 @@ import { db } from "../db";
 import { clearSessionCookie, readSessionUserId, setSessionCookie } from "../session";
 import { isLocale, LOCALE_COOKIE } from "@/lib/i18n";
 import { audit } from "../audit";
+import { findValidInvite } from "../invites";
 
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
@@ -25,6 +26,22 @@ export async function login(_prev: { error?: string } | undefined, formData: For
   await setSessionCookie(user.id);
   await audit(user.id, "auth.login", "User", user.id);
   redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
+}
+
+/** Set a password from an invite link, then sign in. */
+export async function acceptInvite(_prev: { error?: string } | undefined, formData: FormData): Promise<{ error?: string }> {
+  const token = String(formData.get("token") ?? "");
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+  const invite = await findValidInvite(token);
+  if (!invite) return { error: "invite.invalid" };
+  if (password.length < 10) return { error: "invite.tooShort" };
+  if (password !== confirm) return { error: "invite.mismatch" };
+  await db.user.update({ where: { id: invite.userId }, data: { passwordHash: await bcrypt.hash(password, 10), authProvider: "PASSWORD" } });
+  await db.invite.update({ where: { id: invite.id }, data: { usedAt: new Date() } });
+  await setSessionCookie(invite.userId);
+  await audit(invite.userId, "auth.inviteAccepted", "User", invite.userId);
+  redirect("/");
 }
 
 export async function logout() {

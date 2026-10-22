@@ -3,10 +3,13 @@ import { db } from "./db";
 import { itemViewInclude, loadProjectMeta, toItemView } from "./projects";
 import { parseDoc, emptyDoc } from "@/lib/richtext";
 import type { HistoryRev, ItemDetail, LinkedItem } from "@/lib/detail-types";
+import { can, type ProjectAccess } from "./access";
 
-const linkedSelect = { id: true, title: true, state: true, typeId: true, assignedToId: true } as const;
+const linkedSelect = { id: true, title: true, state: true, typeId: true, assignedToId: true, moduleId: true } as const;
+type LinkedRow = { id: number; title: string; state: string; typeId: string; assignedToId: string | null; moduleId: string | null };
 
-export async function loadItemDetail(id: number, userId: string): Promise<ItemDetail | null> {
+/** Full work item for the form. Hides internal comments and linked items the user may not see. */
+export async function loadItemDetail(id: number, userId: string, access: ProjectAccess): Promise<ItemDetail | null> {
   const row = await db.workItem.findUnique({
     where: { id },
     include: {
@@ -27,17 +30,25 @@ export async function loadItemDetail(id: number, userId: string): Promise<ItemDe
   const types = new Map(meta.types.map((t) => [t.id, t]));
   const view = toItemView(row, types);
 
+  const visible = (m: { moduleId: string | null }) => !m.moduleId || !access.lockedModules.has(m.moduleId);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- drop moduleId from the client payload
+  const strip = ({ moduleId, ...rest }: LinkedRow) => rest;
   const links: LinkedItem[] = [];
-  if (row.parent) links.push({ kind: "PARENT", item: row.parent });
-  for (const c of row.children) links.push({ kind: "CHILD", item: c });
+  if (row.parent && visible(row.parent)) links.push({ kind: "PARENT", item: strip(row.parent) });
+  for (const c of row.children) if (visible(c)) links.push({ kind: "CHILD", item: strip(c) });
   for (const l of row.linksFrom) {
+    if (!visible(l.target)) continue;
     const kind = l.type === "BLOCKS" ? "BLOCKS" : l.type === "DUPLICATE_OF" ? "DUPLICATE_OF" : "RELATED";
-    links.push({ kind, item: l.target });
+    links.push({ kind, item: strip(l.target) });
   }
   for (const l of row.linksTo) {
+    if (!visible(l.source)) continue;
     const kind = l.type === "BLOCKS" ? "BLOCKED_BY" : l.type === "DUPLICATE_OF" ? "DUPLICATED_BY" : "RELATED";
-    links.push({ kind, item: l.source });
+    links.push({ kind, item: strip(l.source) });
   }
+  const seesInternal = can(access, "comments.internal");
+  const comments = row.comments.filter((c) => seesInternal || !c.internal);
+  const hiddenComments = new Set(row.comments.filter((c) => !comments.includes(c)).map((c) => c.id));
 
   const revs = new Map<number, HistoryRev>();
   for (const h of row.history) {
@@ -52,7 +63,7 @@ export async function loadItemDetail(id: number, userId: string): Promise<ItemDe
   return {
     projectId: row.projectId,
     item: { ...view, description: parseDoc(row.description), changedById: row.changedById },
-    comments: row.comments.map((c) => {
+    comments: comments.map((c) => {
       const byEmoji = new Map<string, string[]>();
       for (const r of c.reactions) byEmoji.set(r.emoji, [...(byEmoji.get(r.emoji) ?? []), r.userId]);
       return {
@@ -61,12 +72,13 @@ export async function loadItemDetail(id: number, userId: string): Promise<ItemDe
         body: parseDoc(c.body) ?? emptyDoc(),
         createdAt: c.createdAt.toISOString(),
         editedAt: c.editedAt?.toISOString() ?? null,
+        internal: c.internal,
         reactions: [...byEmoji.entries()].map(([emoji, userIds]) => ({ emoji, userIds })),
       };
     }),
     history: [...revs.values()].sort((a, b) => b.rev - a.rev),
     links,
-    attachments: row.attachments.map((a) => ({
+    attachments: row.attachments.filter((a) => !a.commentId || !hiddenComments.has(a.commentId)).map((a) => ({
       id: a.id,
       fileName: a.fileName,
       mimeType: a.mimeType,

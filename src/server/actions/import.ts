@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 import { db } from "../db";
-import { requireConfigurer } from "../auth";
+import { requireEditor } from "../auth";
+import { requirePermission, visibleItemsWhere } from "../access";
 import { run, type ActionResult } from "../result";
 import { UserError, createWorkItem } from "../workitems";
 import { loadProjectMeta } from "../projects";
@@ -15,7 +16,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export async function readImportFile(formData: FormData): Promise<ActionResult<ParsedFile>> {
   return run(async () => {
-    await requireConfigurer();
+    const user = await requireEditor();
+    await requirePermission(user, String(formData.get("projectId") ?? ""), "items.import");
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) throw new UserError("Choose a file.");
     if (file.size > MAX_FILE_BYTES) throw new UserError("The file is larger than 10 MB.");
@@ -40,12 +42,13 @@ const importSchema = z.object({
 
 export async function importItems(input: z.infer<typeof importSchema>): Promise<ActionResult<{ created: number; skipped: number; firstId: number | null; lastId: number | null }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await requireEditor();
     const p = importSchema.parse(input);
+    const access = await requirePermission(user, p.projectId, "items.import");
     const meta = await loadProjectMeta(p.projectId);
     if (!meta) throw new UserError("Unknown project.");
     if (!p.mapping.includes("title")) throw new UserError("Map a column to Title.");
-    const existing = new Set((await db.workItem.findMany({ where: { projectId: meta.id }, select: { id: true } })).map((r) => r.id));
+    const existing = new Set((await db.workItem.findMany({ where: { projectId: meta.id, AND: [visibleItemsWhere(access)] }, select: { id: true } })).map((r) => r.id));
     // Validate again on the server: never trust the preview.
     const results = validateImport(p.rows, p.mapping as ImportTarget[], meta, p.defaults, existing);
     const invalid = results.filter((r) => !r.item);

@@ -1,4 +1,5 @@
 import { getCurrentUser } from "@/server/auth";
+import { accessFor, can, canSeeItem } from "@/server/access";
 import { db } from "@/server/db";
 import { getStorage } from "@/server/storage";
 
@@ -9,8 +10,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const user = await getCurrentUser();
   if (!user) return new Response("Not signed in", { status: 401 });
   const { id } = await params;
-  const att = await db.attachment.findUnique({ where: { id } });
+  const att = await db.attachment.findUnique({ where: { id }, include: { workItem: { select: { projectId: true, moduleId: true } }, comment: { select: { internal: true } } } });
   if (!att) return new Response("Not found", { status: 404 });
+  // Same visibility as the item, and internal comments' images only for those who may see internal notes.
+  const access = await accessFor(user, att.workItem.projectId);
+  if (!canSeeItem(access, att.workItem) || (att.comment?.internal && !can(access, "comments.internal"))) return new Response("Not found", { status: 404 });
   let data: Buffer;
   try {
     data = await getStorage().get(att.storageKey);

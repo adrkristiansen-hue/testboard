@@ -1,22 +1,18 @@
 import "server-only";
 import { z } from "zod";
 import { db } from "./db";
-import type { CurrentUser } from "./auth";
+import { ForbiddenError, type CurrentUser } from "./auth";
+import { accessFor, canSeeItem, requirePermission } from "./access";
+import { missingPermissions, requiredPermissions } from "@/lib/permissions";
 import { loadProjectMeta } from "./projects";
-import { checkTransition, initialState } from "@/lib/workflow";
+import { categoryOf, checkTransition, initialState } from "@/lib/workflow";
 import { normalizeTags, outcomeForTestState, parseJsonObject, parseStringArray } from "@/lib/fields";
 import { docToText, sanitizeDoc, type RtDoc } from "@/lib/richtext";
 import type { TypeLite } from "@/lib/types";
 import { notifyItemChange } from "./notify";
 
-export class UserError extends Error {
-  constructor(
-    message: string,
-    public code: string = "INVALID",
-  ) {
-    super(message);
-  }
-}
+import { UserError } from "./workitems-errors";
+export { UserError };
 
 const docSchema = z.custom<RtDoc>((v) => !!v && typeof v === "object" && (v as RtDoc).type === "doc", "Invalid rich text");
 
@@ -70,8 +66,8 @@ async function assertRefs(projectId: string, patch: ItemPatch) {
     if (!p) throw new UserError("Unknown phase.");
   }
   if (patch.assignedToId) {
-    const u = await db.user.findFirst({ where: { id: patch.assignedToId, active: true } });
-    if (!u) throw new UserError("Unknown user.");
+    const u = await db.user.findFirst({ where: { id: patch.assignedToId, active: true, memberships: { some: { projectId } } } });
+    if (!u) throw new UserError("That user is not a member of this project.");
   }
 }
 
@@ -103,6 +99,9 @@ export async function createWorkItem(rawInput: CreateItemInput, user: CurrentUse
   if (!meta) throw new UserError("Unknown project.");
   const type = typeFor(meta.types, input.typeId);
   if (type.disabled) throw new UserError("This work item type is disabled.");
+  const access = await requirePermission(user, meta.id, "items.create");
+  if (input.moduleId && access.lockedModules.has(input.moduleId)) throw new ForbiddenError("You cannot create work items in that module.");
+  if (input.assignedToId && input.assignedToId !== user.id && !access.permissions.has("items.assign")) throw new ForbiddenError("Your role does not allow assigning work items to others.");
   await assertRefs(meta.id, input);
 
   const wf = { states: type.states, transitions: type.transitions };
@@ -174,10 +173,13 @@ export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: Curr
   const patch = itemPatchSchema.parse(rawPatch);
   const item = await db.workItem.findUnique({ where: { id } });
   if (!item) throw new UserError("Work item not found.", "NOT_FOUND");
+  const access = await accessFor(user, item.projectId);
+  if (!canSeeItem(access, item)) throw new UserError("Work item not found.", "NOT_FOUND");
   const meta = await loadProjectMeta(item.projectId);
   if (!meta) throw new UserError("Unknown project.");
   const type = typeFor(meta.types, item.typeId);
   await assertRefs(meta.id, patch);
+  if (patch.moduleId && patch.moduleId !== item.moduleId && access.lockedModules.has(patch.moduleId)) throw new ForbiddenError("You cannot move work items to that module.");
 
   const data: Record<string, unknown> = {};
   const changes: FieldChange[] = [];
@@ -262,6 +264,16 @@ export async function updateWorkItem(id: number, rawPatch: ItemPatch, user: Curr
 
   if (Object.keys(data).length === 0) return [];
   const isOrderOnly = changes.length === 0;
+  // Check the role against what actually changes (e.g. closing needs "items.close", reassigning "items.assign").
+  const missing = missingPermissions(
+    access.permissions,
+    requiredPermissions(isOrderOnly ? [{ field: "boardOrder" }] : changes, {
+      isOwnItem: item.createdById === user.id,
+      userId: user.id,
+      newStateCategory: newState !== item.state ? categoryOf({ states: type.states }, newState) : undefined,
+    }),
+  );
+  if (missing.length) throw new ForbiddenError(`Your role in this project does not allow this change (${missing.join(", ")}).`);
   if (!isOrderOnly) {
     data.changedById = user.id;
     data.changedAt = new Date();

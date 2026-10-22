@@ -7,7 +7,7 @@ import { run, type ActionResult } from "../result";
 import { UserError } from "../workitems";
 import { audit } from "../audit";
 import { OPS, type Clause } from "@/lib/query";
-import { canConfigure } from "@/lib/types";
+import { can, requireProjectAccess } from "../access";
 
 const conditionSchema = z.object({ field: z.string().max(80), op: z.enum(OPS), value: z.unknown().optional() });
 const clauseSchema: z.ZodType<Clause> = z.lazy(() => z.union([z.object({ logic: z.enum(["and", "or"]), clauses: z.array(clauseSchema).max(50) }), conditionSchema]));
@@ -37,8 +37,9 @@ export async function saveQuery(input: z.infer<typeof saveSchema>): Promise<Acti
   return run(async () => {
     const user = await me();
     const q = saveSchema.parse(input);
-    const lead = canConfigure(user.role);
-    if (q.shared && !lead) throw new ForbiddenError("Only admins and test leads can share queries.");
+    const access = await requireProjectAccess(user, q.projectId);
+    const lead = can(access, "queries.share");
+    if (q.shared && !lead) throw new ForbiddenError("Your role in this project does not allow sharing queries.");
     const data = { name: q.name, shared: q.shared, mode: q.mode, definition: JSON.stringify(q.definition), columns: JSON.stringify(q.columns) };
     if (q.id) {
       const existing = await db.savedQuery.findUnique({ where: { id: q.id } });
@@ -61,7 +62,8 @@ export async function deleteQuery(id: string): Promise<ActionResult> {
     const user = await me();
     const existing = await db.savedQuery.findUnique({ where: { id } });
     if (!existing) throw new UserError("Query not found.", "NOT_FOUND");
-    if (existing.ownerId !== user.id && !(existing.shared && canConfigure(user.role))) throw new ForbiddenError("You cannot delete this query.");
+    const access = await requireProjectAccess(user, existing.projectId);
+    if (existing.ownerId !== user.id && !(existing.shared && can(access, "queries.share"))) throw new ForbiddenError("You cannot delete this query.");
     await db.savedQuery.delete({ where: { id } });
     if (existing.shared) await audit(user.id, "query.delete", "SavedQuery", id, { name: existing.name });
     return undefined;

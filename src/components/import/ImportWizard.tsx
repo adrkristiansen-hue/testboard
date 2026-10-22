@@ -41,6 +41,7 @@ export function ImportWizard({ existingIds, defaultPhaseId }: { existingIds: num
     setDone(null);
     const fd = new FormData();
     fd.set("file", f);
+    fd.set("projectId", meta.id);
     if (sheet) fd.set("sheet", sheet);
     const res = await readImportFile(fd);
     setBusy(false);

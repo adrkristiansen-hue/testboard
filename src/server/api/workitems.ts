@@ -1,7 +1,9 @@
 import "server-only";
 import { z } from "zod";
 import { db } from "../db";
-import { loadItems, loadProjectMeta } from "../projects";
+import { loadVisibleItems, loadProjectMeta, scopeMeta } from "../projects";
+import { accessFor, canView, type ProjectAccess } from "../access";
+import type { CurrentUser } from "../auth";
 import { ApiError } from "./http";
 import { appUrl } from "../email";
 import type { ItemPatch } from "../workitems";
@@ -10,12 +12,13 @@ import { makeResolver, parseDateValue } from "@/lib/resolve";
 import { textToDoc } from "@/lib/richtext";
 import { categoryOf } from "@/lib/workflow";
 
-/** Project by id or key (case-insensitive). */
-export async function projectByRef(ref: string): Promise<ProjectMeta> {
+/** Project by id or key (case-insensitive) that the token's user is a member of. */
+export async function projectByRef(ref: string, user: CurrentUser): Promise<{ meta: ProjectMeta; access: ProjectAccess }> {
   const p = await db.project.findFirst({ where: { OR: [{ id: ref }, { key: ref.toUpperCase() }] }, select: { id: true } });
   const meta = p ? await loadProjectMeta(p.id) : null;
-  if (!meta) throw new ApiError(404, "NOT_FOUND", `Project "${ref}" not found.`);
-  return meta;
+  const access = meta ? await accessFor(user, meta.id) : null;
+  if (!meta || !access || !canView(access)) throw new ApiError(404, "NOT_FOUND", `Project "${ref}" not found.`);
+  return { meta: scopeMeta(meta, access), access };
 }
 
 export interface ApiWorkItem {
@@ -66,12 +69,14 @@ export function toApiItem(i: ItemView, meta: ProjectMeta): ApiWorkItem {
   };
 }
 
-export async function loadApiItem(id: number): Promise<{ item: ApiWorkItem; meta: ProjectMeta }> {
+/** A work item the token's user may see (otherwise 404, never revealing that it exists). */
+export async function loadApiItem(id: number, user: CurrentUser): Promise<{ item: ApiWorkItem; meta: ProjectMeta; access: ProjectAccess }> {
   const row = await db.workItem.findUnique({ where: { id }, select: { projectId: true } });
   const meta = row ? await loadProjectMeta(row.projectId) : null;
-  const [view] = meta ? await loadItems(meta, { id }) : [];
-  if (!meta || !view) throw new ApiError(404, "NOT_FOUND", `Work item #${id} not found.`);
-  return { item: toApiItem(view, meta), meta };
+  const access = meta ? await accessFor(user, meta.id) : null;
+  const [view] = meta && access && canView(access) ? await loadVisibleItems(access, meta, { id }) : [];
+  if (!meta || !access || !view) throw new ApiError(404, "NOT_FOUND", `Work item #${id} not found.`);
+  return { item: toApiItem(view, meta), meta, access };
 }
 
 /** Writable fields, in API terms (keys, e-mails, paths, names). */

@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/server/auth";
-import { loadItems, loadProjectMeta } from "@/server/projects";
+import { projectPage } from "@/server/page-access";
+import { toClientAccess } from "@/server/access";
+import { loadVisibleItems, loadProjectMeta } from "@/server/projects";
+import { scopeMeta } from "@/server/projects";
 import { loadQueries } from "@/server/queries";
 import { emptyQuery, type QueryDefinition } from "@/lib/query";
 import { columnsFromParam, DEFAULT_COLUMNS } from "@/lib/columns";
@@ -24,10 +26,10 @@ function parseDef(raw: string | undefined): QueryDefinition {
 export default async function QueryPage({ params, searchParams }: { params: Promise<{ projectId: string; queryId: string }>; searchParams: Promise<{ def?: string; cols?: string; mode?: string }> }) {
   const { projectId, queryId } = await params;
   const sp = await searchParams;
-  const user = await requireUser();
+  const { user, access } = await projectPage(projectId);
   const meta = await loadProjectMeta(projectId);
   if (!meta) notFound();
-  const [items, queries] = await Promise.all([loadItems(meta), loadQueries(meta.id, user.id)]);
+  const [items, queries] = await Promise.all([loadVisibleItems(access, meta), loadQueries(meta.id, user.id)]);
   let query: SavedQueryView | null;
   if (queryId === "new") {
     query = null;
@@ -47,7 +49,7 @@ export default async function QueryPage({ params, searchParams }: { params: Prom
     updatedAt: new Date().toISOString(),
   };
   return (
-    <ProjectProvider meta={meta}>
+    <ProjectProvider meta={scopeMeta(meta, access)} access={toClientAccess(access)}>
       <QueryEditor key={queryId} query={draft} isNew={!query} items={items} />
     </ProjectProvider>
   );

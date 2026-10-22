@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 import { db } from "../db";
-import { getCurrentUser, requireEditor, requireConfigurer, ForbiddenError } from "../auth";
+import { getCurrentUser, requireEditor, ForbiddenError, type CurrentUser } from "../auth";
+import { accessFor, can, requirePermission, requireVisibleItem, visibleItemsWhere, type ProjectAccess } from "../access";
 import { run, type ActionResult } from "../result";
 import { createWorkItem, updateWorkItem, UserError, type CreateItemInput, type FieldChange, type ItemPatch } from "../workitems";
 import { loadItemDetail } from "../items-detail";
@@ -21,7 +22,8 @@ export async function getItemDetail(id: number): Promise<ActionResult<ItemDetail
   return run(async () => {
     const user = await getCurrentUser();
     if (!user) throw new ForbiddenError("Not signed in.");
-    const detail = await loadItemDetail(id, user.id);
+    const { access } = await requireVisibleItem(user, id);
+    const detail = await loadItemDetail(id, user.id, access);
     if (!detail) throw new UserError("Work item not found.", "NOT_FOUND");
     return detail;
   });
@@ -97,8 +99,9 @@ const bulkCreateSchema = z.object({
 /** Create one test task per title × module × phase, optionally copying steps from a template test task. */
 export async function bulkCreateTestTasks(input: z.infer<typeof bulkCreateSchema>): Promise<ActionResult<{ created: number; skipped: number; ids: number[] }>> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await requireEditor();
     const spec = bulkCreateSchema.parse(input);
+    await requirePermission(user, spec.projectId, "items.import");
     const meta = await loadProjectMeta(spec.projectId);
     if (!meta) throw new UserError("Unknown project.");
     const type = meta.types.find((t) => t.key === "TEST_TASK");
@@ -165,9 +168,11 @@ export async function bulkCreateTestTasks(input: z.infer<typeof bulkCreateSchema
 
 export async function deleteItem(id: number): Promise<ActionResult> {
   return run(async () => {
-    const user = await requireConfigurer();
+    const user = await requireEditor();
+    const { item: row, access } = await requireVisibleItem(user, id);
+    if (!can(access, "items.delete")) throw new ForbiddenError("Your role in this project does not allow deleting work items.");
+    const item = { title: row.title, projectId: row.projectId };
     const atts = await db.attachment.findMany({ where: { workItemId: id } });
-    const item = await db.workItem.findUnique({ where: { id }, select: { title: true, projectId: true } });
     await db.workItem.updateMany({ where: { parentId: id }, data: { parentId: null } });
     await db.workItem.delete({ where: { id } });
     for (const a of atts) await getStorage().delete(a.storageKey).catch(() => undefined);
@@ -221,11 +226,14 @@ export async function moveCard(input: z.infer<typeof moveSchema>): Promise<Actio
 export async function searchItems(projectId: string, query: string): Promise<{ id: number; title: string; typeId: string }[]> {
   const user = await getCurrentUser();
   if (!user) return [];
+  const access = await accessFor(user, projectId);
+  if (!access.isAdmin && !access.member) return [];
   const q = query.trim().replace(/^#/, "");
   const asNum = Number(q);
   const rows = await db.workItem.findMany({
     where: {
       projectId,
+      AND: [visibleItemsWhere(access)],
       ...(q ? { OR: [...(Number.isInteger(asNum) && asNum > 0 ? [{ id: asNum }] : []), { title: { contains: q } }] } : {}),
     },
     select: { id: true, title: true, typeId: true },
@@ -257,27 +265,43 @@ async function saveMentions(commentId: string, doc: RtDoc) {
   return m;
 }
 
-export async function addComment(workItemId: number, body: RtDoc): Promise<ActionResult<{ id: string }>> {
+export async function addComment(workItemId: number, body: RtDoc, internal = false): Promise<ActionResult<{ id: string }>> {
   return run(async () => {
     const user = await requireEditor();
+    const { access } = await requireVisibleItem(user, workItemId);
+    if (!can(access, "comments.add")) throw new ForbiddenError("Your role in this project does not allow comments.");
+    if (internal && !can(access, "comments.internal")) throw new ForbiddenError("Your role cannot write internal comments.");
     if (isDocEmpty(body)) throw new UserError("Comment is empty.");
     const doc = sanitizeDoc(body) as RtDoc;
-    const c = await db.comment.create({ data: { workItemId, authorId: user.id, body: JSON.stringify(doc), bodyText: docToText(doc) } });
+    const c = await db.comment.create({ data: { workItemId, authorId: user.id, body: JSON.stringify(doc), bodyText: docToText(doc), internal } });
     await linkCommentImages(c.id, workItemId, doc);
     const m = await saveMentions(c.id, doc);
     // Validate mention targets exist before notifying
     const users = m.userIds.length ? (await db.user.findMany({ where: { id: { in: m.userIds } }, select: { id: true } })).map((u) => u.id) : [];
     const teams = m.teamIds.length ? (await db.team.findMany({ where: { id: { in: m.teamIds } }, select: { id: true } })).map((t) => t.id) : [];
-    await notifyComment({ itemId: workItemId, actor: user, mentionedUserIds: users, mentionedTeamIds: teams });
+    await notifyComment({ itemId: workItemId, actor: user, mentionedUserIds: users, mentionedTeamIds: teams, internal });
     return { id: c.id };
   });
+}
+
+/** A comment on an item the user can see; internal comments only for those allowed to see them. */
+async function commentFor(user: CurrentUser, commentId: string) {
+  const c = await db.comment.findUnique({ where: { id: commentId } });
+  if (!c) throw new UserError("Comment not found.");
+  const { access } = await requireVisibleItem(user, c.workItemId);
+  if (c.internal && !can(access, "comments.internal")) throw new UserError("Comment not found.");
+  return { ...c, access };
+}
+
+/** Links and attachments count as editing the item. */
+function canEditItem(access: ProjectAccess, item: { createdById: string }, userId: string) {
+  return can(access, "items.edit") || (item.createdById === userId && can(access, "items.editOwn"));
 }
 
 export async function editComment(commentId: string, body: RtDoc): Promise<ActionResult> {
   return run(async () => {
     const user = await requireEditor();
-    const c = await db.comment.findUnique({ where: { id: commentId } });
-    if (!c) throw new UserError("Comment not found.");
+    const c = await commentFor(user, commentId);
     if (c.authorId !== user.id) throw new ForbiddenError("You can only edit your own comments.");
     if (isDocEmpty(body)) throw new UserError("Comment is empty.");
     const doc = sanitizeDoc(body) as RtDoc;
@@ -291,9 +315,8 @@ export async function editComment(commentId: string, body: RtDoc): Promise<Actio
 export async function deleteComment(commentId: string): Promise<ActionResult> {
   return run(async () => {
     const user = await requireEditor();
-    const c = await db.comment.findUnique({ where: { id: commentId } });
-    if (!c) throw new UserError("Comment not found.");
-    if (c.authorId !== user.id && user.role !== "ADMIN") throw new ForbiddenError("You can only delete your own comments.");
+    const c = await commentFor(user, commentId);
+    if (c.authorId !== user.id && !can(c.access, "access.manage")) throw new ForbiddenError("You can only delete your own comments.");
     await db.comment.delete({ where: { id: commentId } });
     return undefined;
   });
@@ -303,6 +326,8 @@ export async function toggleReaction(commentId: string, emoji: string): Promise<
   return run(async () => {
     const user = await requireEditor();
     if (emoji.length > 8) throw new UserError("Invalid reaction.");
+    const c = await commentFor(user, commentId);
+    if (!can(c.access, "comments.add")) throw new ForbiddenError("Your role in this project does not allow reactions.");
     const key = { commentId_userId_emoji: { commentId, userId: user.id, emoji } };
     const existing = await db.commentReaction.findUnique({ where: key });
     if (existing) await db.commentReaction.delete({ where: key });
@@ -318,6 +343,9 @@ export async function toggleReaction(commentId: string, emoji: string): Promise<
 export async function addLink(itemId: number, kind: LinkKind, otherId: number): Promise<ActionResult> {
   return run(async () => {
     const user = await requireEditor();
+    const { item: self, access } = await requireVisibleItem(user, itemId);
+    await requireVisibleItem(user, otherId);
+    if (!canEditItem(access, self, user.id)) throw new ForbiddenError("Your role in this project does not allow changing this work item.");
     if (itemId === otherId) throw new UserError("An item cannot link to itself.");
     const [a, b] = await Promise.all([db.workItem.findUnique({ where: { id: itemId } }), db.workItem.findUnique({ where: { id: otherId } })]);
     if (!a || !b) throw new UserError(`Work item #${otherId} not found.`);
@@ -360,6 +388,8 @@ async function nextRevFor(id: number) {
 export async function removeLink(itemId: number, kind: LinkKind, otherId: number): Promise<ActionResult> {
   return run(async () => {
     const user = await requireEditor();
+    const { item: self, access } = await requireVisibleItem(user, itemId);
+    if (!canEditItem(access, self, user.id)) throw new ForbiddenError("Your role in this project does not allow changing this work item.");
     switch (kind) {
       case "PARENT":
         await updateWorkItem(itemId, { parentId: null }, user);
@@ -390,6 +420,7 @@ export async function toggleFollow(itemId: number): Promise<ActionResult<{ follo
   return run(async () => {
     const user = await getCurrentUser();
     if (!user) throw new ForbiddenError("Not signed in.");
+    await requireVisibleItem(user, itemId);
     const key = { userId_workItemId: { userId: user.id, workItemId: itemId } };
     const existing = await db.follow.findUnique({ where: key });
     if (existing) {
@@ -406,7 +437,8 @@ export async function deleteAttachment(id: string): Promise<ActionResult> {
     const user = await requireEditor();
     const a = await db.attachment.findUnique({ where: { id } });
     if (!a) throw new UserError("Attachment not found.");
-    if (a.uploadedById !== user.id && user.role !== "ADMIN" && user.role !== "TEST_LEAD") throw new ForbiddenError("You can only delete your own attachments.");
+    const { access } = await requireVisibleItem(user, a.workItemId);
+    if (a.uploadedById !== user.id && !can(access, "items.edit")) throw new ForbiddenError("You can only delete your own attachments.");
     await db.attachment.delete({ where: { id } });
     await getStorage().delete(a.storageKey).catch(() => undefined);
     return undefined;

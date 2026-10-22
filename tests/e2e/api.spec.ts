@@ -19,13 +19,16 @@ test("API token: create in UI, use REST API, revoke", async ({ page, request }) 
   const key = projects[0].key;
 
   const title = unique("API defect");
+  // Maja is a customer tester: she may report defects but not assign them to others.
+  const denied = await request.post(`/api/v1/projects/${key}/workitems`, { headers: auth, data: { type: "Defect", title, assignedTo: "Nora Lindeberg" } });
+  expect(denied.status()).toBe(403);
   const created = await request.post(`/api/v1/projects/${key}/workitems`, {
     headers: auth,
-    data: { type: "Defect", title, module: "Hire", phase: "SIT 2", assignedTo: "Nora Lindeberg", severity: 2, fields: { environment: "TEST" } },
+    data: { type: "Defect", title, module: "Hire", phase: "SIT 2", severity: 2, fields: { environment: "TEST" } },
   });
   expect(created.status()).toBe(201);
   const item = await created.json();
-  expect(item).toMatchObject({ type: "DEFECT", title, state: "New", module: "Employee Central > Hire", phase: "SIT 2", assignedTo: { name: "Nora Lindeberg" }, severity: 2 });
+  expect(item).toMatchObject({ type: "DEFECT", title, state: "New", module: "Employee Central > Hire", phase: "SIT 2", assignedTo: null, severity: 2 });
 
   // Workflow rules apply: New -> Fixed is not allowed for defects
   const bad = await request.patch(`/api/v1/workitems/${item.id}`, { headers: auth, data: { state: "Fixed" } });

@@ -17,8 +17,12 @@ import { formatDateTime, formatRelative } from "@/lib/format";
 
 export function Discussion({ itemId, comments, onChanged }: { itemId: number; comments: CommentView[]; onChanged: () => void }) {
   const { t, locale } = useI18n();
-  const { meta, userById } = useProject();
-  const { user, canEdit } = useSessionUser();
+  const { meta, userById, can } = useProject();
+  const { user } = useSessionUser();
+  const canEdit = can("comments.add");
+  const canInternal = can("comments.internal");
+  const canModerate = can("access.manage");
+  const [internal, setInternal] = useState(false);
   const toast = useToast();
   const [draft, setDraft] = useState<RtDoc | null>(null);
   const [editorKey, setEditorKey] = useState(0);
@@ -29,7 +33,7 @@ export function Discussion({ itemId, comments, onChanged }: { itemId: number; co
   const submit = () => {
     if (!draft || isDocEmpty(draft)) return;
     start(async () => {
-      const res = await addComment(itemId, draft);
+      const res = await addComment(itemId, draft, internal);
       if (!res.ok) return toast(res.error, "error");
       setDraft(null);
       setEditorKey((k) => k + 1);
@@ -80,9 +84,15 @@ export function Discussion({ itemId, comments, onChanged }: { itemId: number; co
             onSubmitShortcut={submit}
             minHeight={60}
           />
-          <div className="mt-1 flex justify-end">
-            <button type="button" className="btn btn-primary btn-sm" disabled={pending || !draft || isDocEmpty(draft)} onClick={submit}>
-              {t("item.comment")}
+          <div className="mt-1 flex items-center justify-end gap-3">
+            {canInternal && (
+              <label className="flex items-center gap-1.5 text-xs" title={t("comment.internalHint")}>
+                <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} />
+                🔒 {t("comment.internal")}
+              </label>
+            )}
+            <button type="button" className={`btn btn-sm ${internal ? "btn-secondary border-amber-400" : "btn-primary"}`} disabled={pending || !draft || isDocEmpty(draft)} onClick={submit}>
+              {internal ? t("comment.addInternal") : t("item.comment")}
             </button>
           </div>
         </div>
@@ -95,13 +105,18 @@ export function Discussion({ itemId, comments, onChanged }: { itemId: number; co
           return (
             <li key={c.id} className="flex gap-2">
               <Avatar user={author} size={28} />
-              <div className="min-w-0 flex-1 rounded-md border border-line bg-white">
+              <div className={`min-w-0 flex-1 rounded-md border ${c.internal ? "border-amber-300 bg-amber-50" : "border-line bg-white"}`}>
                 <div className="flex flex-wrap items-center gap-x-2 border-b border-line px-3 py-1.5 text-xs">
                   <span className="font-semibold text-ink">{author?.name ?? "?"}</span>
                   <time dateTime={c.createdAt} title={formatDateTime(c.createdAt, locale)} className="text-ink-muted">
                     {formatRelative(c.createdAt, locale)}
                   </time>
                   {c.editedAt && <span className="text-ink-muted">({t("item.edited")})</span>}
+                  {c.internal && (
+                    <span className="rounded bg-amber-200 px-1.5 font-semibold text-[#5c3a00]" title={t("comment.internalHint")}>
+                      🔒 {t("comment.internal")}
+                    </span>
+                  )}
                   {canEdit && (
                     <div className="ml-auto flex items-center">
                       {mine && (
@@ -109,7 +124,7 @@ export function Discussion({ itemId, comments, onChanged }: { itemId: number; co
                           ✎
                         </button>
                       )}
-                      {(mine || user.role === "ADMIN") && (
+                      {(mine || canModerate) && (
                         <button type="button" className="icon-btn h-6 w-6" aria-label={t("item.deleteComment")} title={t("item.deleteComment")} onClick={() => remove(c.id)}>
                           🗑
                         </button>

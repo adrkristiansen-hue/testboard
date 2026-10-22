@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { db } from "@/server/db";
-import { requireUser } from "@/server/auth";
-import { loadItems, loadProjectMeta, teamModuleIds } from "@/server/projects";
+import { projectPage } from "@/server/page-access";
+import { toClientAccess } from "@/server/access";
+import { loadVisibleItems, loadProjectMeta, teamModuleIds } from "@/server/projects";
+import { scopeMeta } from "@/server/projects";
 import { currentPhase, loadColumns } from "@/server/boards";
 import { parseSwimlaneConfig } from "@/lib/swimlanes";
 import { parseCardConfig } from "@/lib/cards";
@@ -22,21 +24,21 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
 export default async function BoardPage({ params, searchParams }: { params: Promise<Params>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { projectId, teamId } = await params;
   const sp = await searchParams;
-  const user = await requireUser();
+  const { user, access } = await projectPage(projectId);
   const meta = await loadProjectMeta(projectId);
   const team = await db.team.findFirst({ where: { id: teamId, projectId }, include: { members: true, modules: { include: { module: true } } } });
-  if (!meta || !team) notFound();
+  if (!meta || !team || access.hiddenBoards.has(team.id)) notFound();
 
   const moduleIds = await teamModuleIds(team.id, meta);
-  const [items, columns, savedQueries] = await Promise.all([loadItems(meta, { moduleId: { in: [...moduleIds] } }), loadColumns(team.id), loadQueries(meta.id, user.id)]);
+  const [items, columns, savedQueries] = await Promise.all([loadVisibleItems(access, meta, { moduleId: { in: [...moduleIds] } }), loadColumns(team.id), loadQueries(meta.id, user.id)]);
   const firstModule = [...team.modules].sort((a, b) => a.module.order - b.module.order)[0]?.moduleId ?? null;
   const itemParam = Number(Array.isArray(sp.item) ? sp.item[0] : sp.item);
 
   return (
-    <ProjectProvider meta={meta}>
+    <ProjectProvider meta={scopeMeta(meta, access)} access={toClientAccess(access)}>
       <Board
         team={{ id: team.id, name: team.name }}
-        teams={meta.teams}
+        teams={scopeMeta(meta, access).teams}
         columns={columns}
         swimlanes={parseSwimlaneConfig(team.swimlanes)}
         cardConfig={parseCardConfig(team.cardConfig)}

@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/server/auth";
-import { loadItems, loadProjectMeta } from "@/server/projects";
+import { projectPage } from "@/server/page-access";
+import { toClientAccess } from "@/server/access";
+import { loadVisibleItems, loadProjectMeta } from "@/server/projects";
+import { scopeMeta } from "@/server/projects";
 import { currentPhase } from "@/server/boards";
 import { defectDefaultsFromTest, type NewItemDefaults } from "@/lib/prefill";
 import { ProjectProvider } from "@/components/ProjectProvider";
@@ -11,7 +13,7 @@ export const metadata = { title: "New work item" };
 export default async function NewItemPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<{ type?: string; from?: string; parent?: string }> }) {
   const { projectId } = await params;
   const sp = await searchParams;
-  await requireUser();
+  const { access } = await projectPage(projectId, "items.create");
   const meta = await loadProjectMeta(projectId);
   if (!meta) notFound();
   let defaults: NewItemDefaults = { phaseId: currentPhase(meta.phases)?.id ?? null };
@@ -19,11 +21,11 @@ export default async function NewItemPage({ params, searchParams }: { params: Pr
   if (type) defaults.typeId = type.id;
   if (sp.parent) defaults.parentId = Number(sp.parent) || null;
   if (sp.from) {
-    const [source] = await loadItems(meta, { id: Number(sp.from) });
+    const [source] = await loadVisibleItems(access, meta, { id: Number(sp.from) || -1 });
     if (source) defaults = defectDefaultsFromTest(source, meta.types);
   }
   return (
-    <ProjectProvider meta={meta}>
+    <ProjectProvider meta={scopeMeta(meta, access)} access={toClientAccess(access)}>
       <ItemPage itemId={null} newDefaults={defaults} />
     </ProjectProvider>
   );

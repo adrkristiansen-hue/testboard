@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { getCurrentUser } from "@/server/auth";
 import { loadProjectMeta } from "@/server/projects";
+import { accessFor, can } from "@/server/access";
 import { exportFileName } from "@/lib/columns";
 
 /** Excel template with the recognised column headers, one example row and a sheet of valid values. */
@@ -9,7 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ pro
   if (!user) return new Response("Not signed in", { status: 401 });
   const { projectId } = await params;
   const meta = await loadProjectMeta(projectId);
-  if (!meta) return new Response("Not found", { status: 404 });
+  if (!meta || !can(await accessFor(user, projectId), "items.import")) return new Response("Not found", { status: 404 });
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Work items", { views: [{ state: "frozen", ySplit: 1 }] });

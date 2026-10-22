@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/server/db";
 import { requireUser } from "@/server/auth";
+import { visibleProjectIds } from "@/server/access";
 import { getT } from "@/server/locale";
 import { canConfigure } from "@/lib/types";
 import { NewProjectForm } from "@/components/settings/NewProjectForm";
@@ -18,7 +19,8 @@ export default async function ProjectsPage() {
       return [];
     }
   });
-  const projects = await db.project.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { workItems: true, teams: true } } } });
+  const ids = await visibleProjectIds(user);
+  const projects = await db.project.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: "asc" }, include: { _count: { select: { workItems: true, teams: true } } } });
   return (
     <main className="mx-auto w-full max-w-4xl p-4">
       <h1 className="mb-4 text-lg font-semibold">{t("nav.projects")}</h1>
